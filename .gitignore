@@ -143,3 +143,6 @@ vite.config.ts.timestamp-*
 .vite/
 dist/
 .DS_Store
+
+# Local screenshots (UI checks)
+screenshots/

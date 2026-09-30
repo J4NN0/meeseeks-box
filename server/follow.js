@@ -1,21 +1,37 @@
 // Follows a JSONL log incrementally. The first read bootstraps from the last
-// few MB; later reads only parse what was appended since. Lines bigger than
+// BOOT_BYTES (enough to cover a day for all but the hugest sessions); later
+// reads only parse what was appended since. Lines bigger than
 // MAX_LINE (inline screenshots, huge tool outputs) go to the reducer's cheap
 // `big` handler instead of JSON.parse.
 //
 // A reducer is { init(), feed(state, row), big?(line), summary(state) }.
 
 import fsp from 'node:fs/promises';
+import { setImmediate as yieldNow } from 'node:timers/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { MIN } from './util.js';
 
-const BOOT_BYTES = 8 * 1024 * 1024;
-const CHUNK_BYTES = 16 * 1024 * 1024;
+const BOOT_BYTES = 64 * 1024 * 1024;
+// Parsing is synchronous, so a first read of a big log is split into chunks
+// with a yield between them: other requests get served meanwhile.
+const CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_LINE = 256 * 1024;
 
 const logs = new Map();
+const reading = new Map();
 
-export async function follow(file, reducer) {
+/**
+ * Reads what was appended to `file` and returns the reducer's summary. Calls
+ * for the same file queue up, so two scans never parse the same bytes twice.
+ */
+export function follow(file, reducer) {
+  const next = (reading.get(file) || Promise.resolve()).catch(() => {}).then(() => readLog(file, reducer));
+  reading.set(file, next);
+  next.finally(() => { if (reading.get(file) === next) reading.delete(file); }).catch(() => {});
+  return next;
+}
+
+async function readLog(file, reducer) {
   let st;
   try { st = await fsp.stat(file); } catch { logs.delete(file); return null; }
   let entry = logs.get(file);
@@ -44,6 +60,7 @@ export async function follow(file, reducer) {
           else try { row = JSON.parse(line); } catch { /* corrupt line */ }
           if (row) reducer.feed(entry.state, row);
         }
+        if (entry.offset < st.size) await yieldNow();
       }
     } finally {
       await fh.close();

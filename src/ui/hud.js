@@ -1,5 +1,5 @@
-import { MASCOT_MODES } from '../characters/index.js';
-import { LEGEND_PROVIDERS, STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo } from '../status.js';
+import { MASCOT_MODES, agentColor } from '../characters/index.js';
+import { LEGEND_PROVIDERS, STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo, testSummary } from '../status.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -14,7 +14,7 @@ const LEGEND_STATUSES = [
 ];
 
 export class Hud {
-  constructor({ mode, onModeChange, onWalk, onReset, onClosePanel }) {
+  constructor({ mode, onModeChange, onWalk, onReset, onClosePanel, onGoToAgent }) {
     const select = $('mascot-mode');
     for (const [value, label] of Object.entries(MASCOT_MODES)) select.add(new Option(label, value, false, value === mode));
     select.addEventListener('change', () => onModeChange(select.value));
@@ -33,9 +33,20 @@ export class Hud {
 
     this.panel = $('panel');
     this.panelBody = $('panel-body');
-    this.selected = null;
+    this.selected = null; // agent in the panel
+    this.project = null; // or { key, focus } for a project recap
+    this.today = null;
+    this.agents = [];
     this.panelKey = '';
+    this.onGoToAgent = onGoToAgent;
+    // One listener for the project panel's buttons, which are rebuilt often.
+    this.panelBody.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-agent]');
+      if (go) this.onGoToAgent?.(go.dataset.agent);
+    });
   }
+
+  get panelOpen() { return !this.panel.hidden; }
 
   /** First-person overlays: crosshair while walking, pause card when not. */
   setWalk({ active, locked, flying, resuming }) {
@@ -44,18 +55,29 @@ export class Hud {
     this.walkBtn.setAttribute('aria-pressed', String(active));
     $('crosshair').hidden = !(active && locked);
     $('walk-hint').hidden = !(active && locked);
-    $('walk-pause').hidden = !(active && !locked && !flying && !this.selected);
+    $('walk-pause').hidden = !(active && !locked && !flying && !this.panelOpen);
     $('walk-pause').classList.toggle('resuming', !!resuming);
   }
 
-  setAim(agent) {
-    $('crosshair').classList.toggle('on', !!agent);
-    const text = agent ? `${agent.session.project || agent.session.title} · ${STATUS_LABELS[agent.visualStatus] || ''}` : '';
+  /** What the crosshair is on: an agent, a board item (its label), or nothing. */
+  setAim(target) {
+    const agent = target?.agent;
+    const text = agent ? `${agent.session.project || agent.session.title} · ${STATUS_LABELS[agent.visualStatus] || ''}` : target?.action?.label || '';
+    $('crosshair').classList.toggle('on', !!text);
     const aim = $('aim');
-    if (aim.textContent !== text) aim.textContent = text;
+    if (aim.dataset.text === text) return;
+    aim.dataset.text = text;
+    // First line is the headline; anything after a newline is detail.
+    const [title, ...rest] = text.split('\n');
+    const parts = [];
+    if (title) parts.push(Object.assign(document.createElement('b'), { textContent: title }));
+    if (rest.length) parts.push(Object.assign(document.createElement('span'), { className: 'detail', textContent: rest.join(' ') }));
+    aim.replaceChildren(...parts);
   }
 
-  update(agents, feedState, now) {
+  update(agents, feedState, now, today) {
+    this.agents = agents;
+    this.today = today;
     const n = (s) => agents.filter((a) => a.visualStatus === s).length;
     const working = n('working') + n('stressed');
     const waiting = n('waiting');
@@ -70,13 +92,11 @@ export class Hud {
     empty.dataset.state = feedState;
 
     const total = agents.filter((a) => a.visualStatus !== 'leaving').length;
-    $('tagline').textContent = total
-      ? `Look at me! ${working} working${waiting ? `, ${waiting} waiting on you` : ''}${sleeping ? `, ${sleeping} napping` : ''}.`
-      : 'Existence is pain… and the office is empty.';
     document.title = waiting ? `(${waiting}) Meeseeks Box` : 'Meeseeks Box';
     $('empty').hidden = total > 0 || feedState === 'connecting' || document.body.classList.contains('walking');
 
     if (this.selected) this.renderPanel(now);
+    else if (this.project) this.renderProject(now);
   }
 
   toast(html, color) {
@@ -99,13 +119,24 @@ export class Hud {
 
   showPanel(agent) {
     this.selected = agent;
+    this.project = null;
     this.panelKey = '';
     this.panel.hidden = false;
     this.renderPanel(Date.now());
   }
 
+  /** Today's recap for one project; `focus` highlights a session or one of its turns. */
+  showProject(key, focus = null) {
+    this.selected = null;
+    this.project = { key, focus, scrolled: false };
+    this.panelKey = '';
+    this.panel.hidden = false;
+    this.renderProject(Date.now());
+  }
+
   hidePanel() {
     this.selected = null;
+    this.project = null;
     this.panel.hidden = true;
   }
 
@@ -172,6 +203,85 @@ export class Hud {
     }
   }
 
+  renderProject(now) {
+    const { key, focus } = this.project;
+    const today = this.today;
+    const p = today?.projects.find((x) => x.key === key);
+    const live = new Map(this.agents.map((a) => [a.id, a]));
+    const panelKey = `${key}:${today?.now}:${JSON.stringify(focus)}:${[...live.keys()].join()}`;
+    if (panelKey === this.panelKey) return;
+    this.panelKey = panelKey;
+    this.panel.style.setProperty('--agent', '#97ce4c');
+    this.panel.style.setProperty('--status', '#fff3a8');
+    if (!p) {
+      this.panelBody.innerHTML = `<header><span class="provider"><i></i>Today</span><h2>Nothing recorded yet</h2></header>`;
+      return;
+    }
+    const sessions = today.sessions.filter((s) => p.sessionIds.includes(s.id));
+    const workMs = sessions.reduce((n, s) => n + s.turns.reduce((m, t) => m + (t.end - Math.max(t.start, today.since)), 0), 0);
+    const add = p.commits.reduce((n, c) => n + c.added, 0);
+    const del = p.commits.reduce((n, c) => n + c.removed, 0);
+    const test = testSummary(p.test, now);
+    const rows = [
+      ['Directory', p.key],
+      ['Branch', p.branch],
+      ['Uncommitted', p.changes ? (p.changes.files ? `${p.changes.files} files · +${num(p.changes.added)} −${num(p.changes.removed)}` : 'nothing') : p.repo ? '' : 'not a git repo'],
+      ['Commits today', p.repo ? (p.commits.length ? `${p.commits.length} · +${num(add)} −${num(del)}` : 'none') : ''],
+      ['Last test run', test ? test.text : 'none today'],
+      ['Agent time', formatDuration(workMs)],
+    ].filter(([, v]) => v);
+    const color = (id) => live.get(id)?.colorHex || `#${agentColor(id.split(':')[0], id).getHexString()}`;
+    const dots = (ids) => ids.map((id) => `<i class="dot" style="--c:${color(id)}"></i>`).join('');
+
+    const files = p.repo
+      ? (p.changes?.list || []).map((f) => `<li><code>${esc(f.code)}</code><span>${esc(f.path)}</span><span class="by">${dots(f.by)}</span><span class="num">${f.added || f.removed ? `+${num(f.added)} −${num(f.removed)}` : ''}</span></li>`)
+      : p.edited.map((f) => `<li><code>✏️</code><span>${esc(f.path)}</span><span class="by">${dots(f.by)}</span><span class="num">${clock(f.ts)}</span></li>`);
+    const more = p.changes && p.changes.files > (p.changes.list || []).length ? `<li class="more">and ${p.changes.files - p.changes.list.length} more</li>` : '';
+    const commits = p.commits.map((c) => `<li><code>${esc(c.hash)}</code><span>${esc(c.subject)}</span><span class="by"></span><span class="num">${clock(c.ts)}</span></li>`);
+
+    const sessionHtml = sessions.map((s) => {
+      const agent = live.get(s.id);
+      const turns = s.turns.map((t, i) => {
+        const hl = focus?.sessionId === s.id && focus.turn === i;
+        const end = !t.done && i === s.turns.length - 1 && agent && (agent.visualStatus === 'working' || agent.visualStatus === 'stressed') ? null : t.end;
+        return `<li data-kind="prompt"${hl ? ' class="hl"' : ''}><span>🧑</span><span>${esc(t.prompt || '(started without a prompt)')}</span><time>${clock(t.start)} · ${end ? formatDuration(end - t.start) : 'now'}</time></li>`;
+      }).reverse().join('');
+      const status = agent ? STATUS_LABELS[agent.visualStatus] || '' : 'ended';
+      const recap = s.recap ? `<blockquote>“${esc(s.recap.text)}” <time>${clock(s.recap.ts)}</time></blockquote>` : '';
+      const testLine = s.test ? `<p class="test">🧪 <code>${esc(s.test.cmd)}</code> ${esc(testSummary(s.test, now).text)}</p>` : '';
+      return `
+        <section class="session${focus?.sessionId === s.id ? ' focus' : ''}" data-session="${esc(s.id)}">
+          <h4><i class="dot" style="--c:${color(s.id)}"></i><span>${esc(s.title)}</span><em>${esc(providerInfo(s.provider).name)} · ${esc(status)}</em>
+          ${agent ? `<button type="button" data-agent="${esc(s.id)}">Go to agent</button>` : ''}</h4>
+          ${recap}${testLine}
+          <ol>${turns}</ol>
+        </section>`;
+    }).join('');
+
+    const scroll = this.panelBody.querySelector('.scroll')?.scrollTop || 0;
+    this.panelBody.innerHTML = `
+      <header>
+        <span class="provider"><i></i>Today’s recap</span>
+        <h2>${esc(p.name)}</h2>
+        <span class="status">${sessions.length} session${sessions.length === 1 ? '' : 's'} today</span>
+      </header>
+      <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      <div class="scroll">
+        ${p.repo ? '<h3>Uncommitted changes</h3>' : '<h3>Files the agents edited</h3>'}
+        <ul class="files">${files.join('') || '<li class="more">Nothing here.</li>'}${more}</ul>
+        ${p.repo ? `<h3>Commits today</h3><ul class="files">${commits.join('') || '<li class="more">None yet.</li>'}</ul>` : ''}
+        <h3>Sessions and turns</h3>
+        ${sessionHtml}
+      </div>`;
+    const box = this.panelBody.querySelector('.scroll');
+    box.scrollTop = scroll;
+    if (!this.project.scrolled && focus) {
+      this.project.scrolled = true;
+      const target = box.querySelector('li.hl') || box.querySelector('section.focus');
+      target?.scrollIntoView({ block: 'center' });
+    }
+  }
+
   updateTimes(now) {
     for (const el of this.panelBody.querySelectorAll('[data-since]')) {
       const text = formatDuration(now - Number(el.dataset.since));
@@ -183,6 +293,9 @@ export class Hud {
     }
   }
 }
+
+const num = (n) => Number(n || 0).toLocaleString();
+const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 function ago(ms) {
   if (ms < 5000) return 'now';

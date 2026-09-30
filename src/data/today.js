@@ -1,0 +1,30 @@
+// Polls the scanner for today's recap: turns, changes, tests, tokens, limits.
+// Slower than the session feed; a failed poll keeps the last good data.
+
+const POLL_MS = 10_000;
+
+export class TodayFeed {
+  constructor() {
+    this.data = null;
+    this.listeners = new Set();
+  }
+
+  onChange(fn) { this.listeners.add(fn); }
+
+  start() {
+    const loop = async () => {
+      await this.poll();
+      this.timer = setTimeout(loop, POLL_MS);
+    };
+    loop();
+  }
+
+  async poll() {
+    try {
+      const res = await fetch('/api/today', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.data = await res.json();
+      for (const fn of this.listeners) fn(this.data);
+    } catch { /* keep what we had */ }
+  }
+}

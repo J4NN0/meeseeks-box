@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo, statusSince } from '../status.js';
 
 // Everything that shows text in the room is a canvas redrawn on demand:
-// desk monitors, the wall TV, the whiteboard and the neon sign.
+// desk monitors and the neon sign here, the wall TV and the whiteboard in
+// their own modules (they share these helpers).
 
 const MONO = '600 17px ui-monospace, "SF Mono", Menlo, monospace';
 
-function canvasTexture(w, h) {
+export function canvasTexture(w, h) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -16,7 +17,7 @@ function canvasTexture(w, h) {
   return { canvas, ctx: canvas.getContext('2d'), texture };
 }
 
-function fit(ctx, text, width) {
+export function fit(ctx, text, width) {
   if (ctx.measureText(text).width <= width) return text;
   let lo = 0, hi = text.length;
   while (lo < hi) {
@@ -27,7 +28,7 @@ function fit(ctx, text, width) {
   return text.slice(0, lo) + '…';
 }
 
-function wrap(ctx, text, width, maxLines) {
+export function wrap(ctx, text, width, maxLines) {
   const words = String(text).split(' ');
   const lines = [];
   let line = '';
@@ -44,7 +45,7 @@ function wrap(ctx, text, width, maxLines) {
   return lines.slice(0, maxLines);
 }
 
-function roundRect(ctx, x, y, w, h, r) {
+export function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, r);
 }
@@ -156,156 +157,6 @@ export class TerminalScreen {
       ctx.font = '800 22px ui-rounded, system-ui';
       ctx.fillText('z', 428 + Math.sin(t + 2) * 6, 70);
     }
-    this.texture.needsUpdate = true;
-  }
-}
-
-// ---------------------------------------------------------------- wall TV
-
-export class DashboardScreen {
-  constructor() {
-    Object.assign(this, canvasTexture(1024, 576));
-    this.lastKey = '';
-  }
-
-  draw(agents, now, mode) {
-    const key = `${Math.floor(now / 1000)}:${agents.length}:${mode}`;
-    if (key === this.lastKey) return;
-    this.lastKey = key;
-    const { ctx, canvas } = this;
-    const W = canvas.width, H = canvas.height;
-
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#0e2a2f');
-    g.addColorStop(1, '#122036');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.fillStyle = '#97ce4c';
-    ctx.font = '800 38px "Luckiest Guy", ui-rounded, system-ui';
-    ctx.fillText('MISSION CONTROL', 36, 62);
-    ctx.fillStyle = '#6fd3f7';
-    ctx.font = '600 20px ui-monospace, Menlo, monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), W - 36, 56);
-    ctx.fillText(mode === 'offline' ? 'SCANNER OFFLINE' : 'LIVE · C-137', W - 36, 84);
-    ctx.textAlign = 'left';
-
-    const count = (s) => agents.filter((a) => a.visualStatus === s).length;
-    const tiles = [
-      ['WORKING', count('working') + count('stressed'), STATUS_COLORS.working],
-      ['NEED YOU', count('waiting'), STATUS_COLORS.waiting],
-      ['NAPPING', count('sleeping'), STATUS_COLORS.sleeping],
-    ];
-    tiles.forEach(([label, n, color], i) => {
-      const x = 36 + i * 322;
-      ctx.fillStyle = 'rgba(255,255,255,0.06)';
-      roundRect(ctx, x, 104, 300, 132, 16);
-      ctx.fill();
-      ctx.fillStyle = color;
-      ctx.font = '800 76px ui-rounded, system-ui';
-      ctx.fillText(String(n), x + 24, 196);
-      ctx.font = '700 22px ui-rounded, system-ui';
-      ctx.fillText(label, x + 24, 222);
-    });
-
-    const live = agents.filter((a) => a.visualStatus !== 'leaving');
-    const oldest = [...live].sort((a, b) => a.session.startedAt - b.session.startedAt)[0];
-    ctx.font = '600 21px ui-rounded, system-ui';
-    ctx.fillStyle = '#c9d3df';
-    if (oldest) {
-      const age = now - oldest.session.startedAt;
-      const suffix = age > 3_600_000 ? '  — existence is pain' : '';
-      ctx.fillText(fit(ctx, `Oldest Meeseeks: ${oldest.session.project} · alive ${formatDuration(age)}${suffix}`, W - 72), 36, 276);
-    } else {
-      ctx.fillText('No Meeseeks summoned. Press the box to make one!', 36, 276);
-    }
-
-    // Combined activity feed.
-    const feed = [];
-    for (const a of live) for (const e of a.session.activity.slice(-6)) if (e.kind !== 'think') feed.push({ ...e, project: a.session.project, color: a.colorHex });
-    feed.sort((a, b) => b.ts - a.ts);
-    ctx.font = '500 19px ui-monospace, Menlo, monospace';
-    feed.slice(0, 9).forEach((e, i) => {
-      const y = 322 + i * 27;
-      ctx.fillStyle = e.color;
-      ctx.fillRect(36, y - 15, 8, 18);
-      ctx.fillStyle = '#7f8ea3';
-      const project = fit(ctx, e.project, 180);
-      ctx.fillText(project, 56, y);
-      ctx.fillStyle = '#e6edf5';
-      ctx.fillText(fit(ctx, `${e.icon || ''} ${e.text}`, W - 290), 250, y);
-    });
-    this.texture.needsUpdate = true;
-  }
-}
-
-// ------------------------------------------------------------- whiteboard
-
-const STATIC_TODO = ["Get 2 strokes off Jerry's golf game", 'Find more Szechuan sauce', 'Raise Series A (Council of Ricks?)', 'Fix portal fluid leak'];
-
-export class Whiteboard {
-  constructor() {
-    Object.assign(this, canvasTexture(1024, 560));
-    this.lastKey = '';
-  }
-
-  draw(agents, done) {
-    const doing = agents.filter((a) => a.visualStatus === 'working' || a.visualStatus === 'stressed').map((a) => a.session.title);
-    const waiting = agents.filter((a) => a.visualStatus === 'waiting').map((a) => a.session.title);
-    const key = JSON.stringify([doing, waiting, done.slice(-4)]);
-    if (key === this.lastKey) return;
-    this.lastKey = key;
-    const { ctx, canvas } = this;
-    const W = canvas.width, H = canvas.height;
-    ctx.fillStyle = '#f6f6f0';
-    ctx.fillRect(0, 0, W, H);
-
-    const marker = (size) => `${size}px "Permanent Marker", "Patrick Hand", "Marker Felt", "Comic Sans MS", cursive`;
-    ctx.fillStyle = '#2b4c7e';
-    ctx.font = marker(40);
-    ctx.fillText('SPRINT ∞', 28, 54);
-    ctx.fillStyle = '#c0392b';
-    ctx.font = marker(22);
-    ctx.fillText('ship it or get schwifty', 260, 50);
-
-    const cols = [
-      ['TODO', STATIC_TODO, '#fff3a8'],
-      ['DOING', doing, '#bfe6ff'],
-      ['NEEDS YOU', waiting, '#ffc7d9'],
-      ['DONE ✨', done.slice(-4).reverse(), '#c9f2b5'],
-    ];
-    const colW = (W - 40) / cols.length;
-    cols.forEach(([title, items, color], i) => {
-      const x = 20 + i * colW;
-      ctx.strokeStyle = '#555';
-      ctx.lineWidth = 3;
-      if (i > 0) {
-        ctx.beginPath();
-        ctx.moveTo(x, 80);
-        ctx.lineTo(x + 4, H - 20);
-        ctx.stroke();
-      }
-      ctx.fillStyle = '#333';
-      ctx.font = marker(26);
-      ctx.fillText(title, x + 14, 110);
-      items.slice(0, 4).forEach((text, j) => {
-        const nx = x + 12 + (j % 2) * 6;
-        const ny = 128 + j * 102;
-        ctx.save();
-        ctx.translate(nx + colW / 2, ny + 44);
-        ctx.rotate(((j * 37 + i * 11) % 7 - 3) * 0.012);
-        ctx.fillStyle = color;
-        ctx.shadowColor = 'rgba(0,0,0,0.18)';
-        ctx.shadowBlur = 6;
-        ctx.fillRect(-colW / 2 + 6, -42, colW - 28, 88);
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = '#2d2d2d';
-        ctx.font = marker(19);
-        wrap(ctx, text || '???', colW - 48, 3).forEach((l, k) => ctx.fillText(l, -colW / 2 + 16, -14 + k * 24));
-        ctx.restore();
-      });
-    });
     this.texture.needsUpdate = true;
   }
 }

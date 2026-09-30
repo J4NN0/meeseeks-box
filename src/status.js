@@ -44,3 +44,19 @@ export function formatDuration(msec) {
   if (h < 48) return `${h}h ${String(m % 60).padStart(2, '0')}m`;
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
+
+function ago(ms) {
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
+}
+
+/** A test run as one line: "✓ 812 passed · 3m ago", with ok true/false/null. */
+export function testSummary(test, now) {
+  if (!test) return null;
+  const when = ago(now - test.ts);
+  if (test.status === 'fail') return { ok: false, text: `✗ ${test.failed ? `${test.failed} failed` : 'failed'} · ${when}` };
+  if (test.status === 'pass') return { ok: true, text: `✓ ${test.passed ? `${Number(test.passed).toLocaleString()} passed` : 'passed'} · ${when}` };
+  return { ok: null, text: `ran ${when}` };
+}

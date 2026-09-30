@@ -12,6 +12,7 @@ import { World } from './world/index.js';
 import { ROOM, WALK_BOUNDS, PORTAL } from './world/room.js';
 import { AgentManager } from './agents/manager.js';
 import { Feed } from './data/feed.js';
+import { TodayFeed } from './data/today.js';
 import { Hud } from './ui/hud.js';
 import { MASCOT_MODES } from './characters/index.js';
 import { CONFIG } from './config.js';
@@ -54,7 +55,9 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance = 2.5;
 controls.maxDistance = 34;
-controls.maxPolarAngle = 1.42;
+// Don't let the overview dip below the floor line; board close-ups relax it.
+const ORBIT_MAX_POLAR = 1.42;
+controls.maxPolarAngle = ORBIT_MAX_POLAR;
 controls.minAzimuthAngle = -0.35;
 controls.maxAzimuthAngle = 1.45;
 controls.screenSpacePanning = true;
@@ -66,6 +69,8 @@ ink.enabled = CONFIG.ink;
 // World ---------------------------------------------------------------------
 const world = new World(scene);
 const feed = new Feed();
+const today = new TodayFeed();
+world.room.dashboard.setProvider(store.get('limits', 'claude'));
 let mode = CONFIG.mascots || store.get('mascots', 'meeseeks');
 if (!MASCOT_MODES[mode]) mode = 'meeseeks';
 const bootAt = performance.now();
@@ -82,7 +87,8 @@ const hud = new Hud({
   },
   onWalk: () => (view === 'walk' ? walker.lock() : enterWalk()),
   onReset: () => (view === 'walk' ? exitWalk() : unfocus()),
-  onClosePanel: () => unfocus(),
+  onClosePanel: () => closePanel(),
+  onGoToAgent: (id) => act({ kind: 'agent', agentId: id }),
 });
 
 const manager = new AgentManager(world, {
@@ -97,6 +103,8 @@ manager.mode = mode;
 
 feed.onChange((sessions) => manager.sync(sessions, Date.now()));
 feed.start();
+today.onChange(() => world.room.whiteboard.draw(today.data, manager.list(), Date.now()));
+today.start();
 
 // Camera moves -----------------------------------------------------------------
 let flight = null;
@@ -129,6 +137,7 @@ function updateFlight(dt) {
 
 function focusAgent(agent) {
   focused = agent;
+  leaveBoard();
   hud.showPanel(agent);
   if (view === 'walk') {
     // You're already standing there; just free the mouse for the panel.
@@ -140,8 +149,89 @@ function focusAgent(agent) {
   flyTo(eye, look);
 }
 
+// The wall boards: in the overview, the first click flies up to one; after
+// that its items are clickable. Walking, you just aim and click.
+let focusedBoard = null;
+const BOARDS = [world.room.tvScreen, world.room.wbFace];
+
+/**
+ * Where to stand to read a board: square on, far enough to fit it. With the
+ * side panel open, slide over so the board sits in the space left of it.
+ */
+function boardView(face, withPanel = false) {
+  const center = face.getWorldPosition(new THREE.Vector3());
+  const q = face.getWorldQuaternion(new THREE.Quaternion());
+  const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+  const { width, height } = face.geometry.parameters;
+  const tan = Math.tan(THREE.MathUtils.degToRad(baseFov / 2));
+  const covered = withPanel && innerWidth > 900 ? (document.getElementById('panel').offsetWidth + 32) / innerWidth : 0;
+  const d = Math.max((height * 1.2) / 2 / tan, (width * 1.08) / 2 / (tan * camera.aspect * (1 - covered)));
+  const look = center.clone().addScaledVector(right, covered * d * tan * camera.aspect);
+  const eye = look.clone().addScaledVector(normal, d);
+  eye.y += d * 0.04;
+  return { eye, look };
+}
+
+function faceOf(board) {
+  return BOARDS.find((f) => f.userData.board === board);
+}
+
+function focusBoard(board) {
+  const face = faceOf(board);
+  if (!face) return;
+  focused = null;
+  hud.hidePanel();
+  focusedBoard = board;
+  document.body.classList.add('board-focus');
+  controls.maxPolarAngle = Math.PI / 2 - 0.02;
+  const { eye, look } = boardView(face);
+  flyTo(eye, look);
+}
+
+function leaveBoard() {
+  focusedBoard = null;
+  document.body.classList.remove('board-focus');
+}
+
+function openProject(key, focus) {
+  focused = null;
+  hud.showProject(key, focus);
+  if (view === 'walk') {
+    walker.unlock();
+    syncWalkHud();
+  } else if (focusedBoard) {
+    const { eye, look } = boardView(faceOf(focusedBoard), true);
+    flyTo(eye, look, { duration: 0.6 });
+  }
+}
+
+/** Runs a board item's action. */
+function act(action) {
+  if (action.kind === 'agent') {
+    const agent = manager.byId(action.agentId);
+    if (agent && agent.phase !== 'gone' && agent.phase !== 'leaving') focusAgent(agent);
+    else hud.toast('✨ That agent already finished and vanished.');
+  } else if (action.kind === 'project') {
+    openProject(action.key, action.focus);
+  } else if (action.kind === 'limits') {
+    world.room.dashboard.setProvider(action.provider);
+    store.set('limits', action.provider);
+  }
+}
+
+/** The panel's ✕: on a board, just close it; otherwise go back out. */
+function closePanel() {
+  if (!focusedBoard || view !== 'orbit') return unfocus();
+  if (!hud.panelOpen) return unfocus();
+  hud.hidePanel();
+  const { eye, look } = boardView(faceOf(focusedBoard));
+  flyTo(eye, look, { duration: 0.6 });
+}
+
 function unfocus() {
   focused = null;
+  leaveBoard();
   hud.hidePanel();
   if (view === 'walk') {
     walker.lock();
@@ -155,6 +245,7 @@ function unfocus() {
 function enterWalk() {
   if (view === 'walk') return;
   focused = null;
+  leaveBoard();
   hud.hidePanel();
   view = 'walk';
   controls.enabled = false;
@@ -191,7 +282,8 @@ function syncWalkHud() {
 }
 
 walker.addEventListener('lock', () => {
-  if (focused) { focused = null; hud.hidePanel(); }
+  focused = null;
+  if (hud.panelOpen) hud.hidePanel();
   syncWalkHud();
 });
 walker.addEventListener('unlock', syncWalkHud);
@@ -218,24 +310,48 @@ let aimed = null;
 let aimFrame = 0;
 let downAt = null;
 
-/** Agent under a screen point: the mascot itself, its helpers, or its desk. */
-function agentAt(ndc, maxDistance = Infinity) {
+/**
+ * What's under a screen point: { agent } for a mascot, its helpers or its
+ * desk; { board, action } for a wall board (action is null between items).
+ */
+function pick(ndc, maxDistance = Infinity) {
   raycaster.setFromCamera(ndc, camera);
   raycaster.far = maxDistance;
   for (const hit of raycaster.intersectObjects(scene.children, true)) {
+    // Raycasts ignore visibility: skip what isn't on screen (the walk-mode
+    // ceiling and walls while in the overview).
+    if (!shown(hit.object)) continue;
     const d = hit.object.userData;
-    if (d.agentId) return manager.byId(d.agentId) || null;
-    if (d.deskIndex !== undefined) return world.desks[d.deskIndex].agent || null;
-    if (hit.object.isMesh && hit.object.visible && !hit.object.material.transparent) return null;
+    if (d.agentId) {
+      const agent = manager.byId(d.agentId);
+      return agent ? { agent } : null;
+    }
+    if (d.deskIndex !== undefined) {
+      const agent = world.desks[d.deskIndex].agent;
+      return agent ? { agent } : null;
+    }
+    if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
+    if (hit.object.isMesh && !hit.object.material.transparent) return null;
   }
   return null;
 }
 
-function setHovered(agent) {
-  if (agent === hovered) return;
-  hovered?.setHighlight(false);
-  agent?.setHighlight(true);
-  hovered = agent;
+function shown(object) {
+  for (let o = object; o; o = o.parent) if (!o.visible) return false;
+  return true;
+}
+
+function setPointed(target) {
+  const agent = target?.agent || null;
+  if (agent !== hovered) {
+    hovered?.setHighlight(false);
+    agent?.setHighlight(true);
+    hovered = agent;
+  }
+  for (const face of BOARDS) {
+    const board = face.userData.board;
+    board.setHover(target?.board === board ? target.action?.id : '');
+  }
 }
 
 function toNdc(event) {
@@ -248,31 +364,39 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   if (view !== 'orbit') return;
   // Raycasting the whole room is not free: do it at most once per frame.
   if (!pendingMove) requestAnimationFrame(() => {
-    const agent = agentAt(toNdc(pendingMove));
-    setHovered(agent);
-    document.body.classList.toggle('hovering', !!agent);
+    const target = pick(toNdc(pendingMove));
+    // A board's items only react once you've flown up to it.
+    if (target?.board && target.board !== focusedBoard) target.action = null;
+    setPointed(target);
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board));
     pendingMove = null;
   });
   pendingMove = e;
 });
+renderer.domElement.addEventListener('pointerleave', () => {
+  if (view === 'orbit') setPointed(null);
+});
 renderer.domElement.addEventListener('pointerdown', (e) => {
   downAt = { x: e.clientX, y: e.clientY };
   if (view === 'walk') {
-    if (walker.locked) { if (aimed) focusAgent(aimed); }
-    else if (!flight) walker.lock();
+    if (!walker.locked) { if (!flight) walker.lock(); }
+    else if (aimed?.agent) focusAgent(aimed.agent);
+    else if (aimed?.action) act(aimed.action);
   }
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (view !== 'orbit') return;
   if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
-  const agent = agentAt(toNdc(e));
-  if (agent) focusAgent(agent);
+  const target = pick(toNdc(e));
+  if (target?.agent) focusAgent(target.agent);
+  else if (target?.board && target.board !== focusedBoard) focusBoard(target.board);
+  else if (target?.action) act(target.action);
 });
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey) return;
   if (e.key === 'Escape') {
-    if (view === 'orbit') unfocus();
-    else if (focused) { focused = null; hud.hidePanel(); syncWalkHud(); }
+    if (view === 'orbit') closePanel();
+    else if (hud.panelOpen) { focused = null; hud.hidePanel(); syncWalkHud(); }
   }
   if (e.code === 'KeyF' && view === 'orbit') enterWalk();
   if (e.code === 'KeyO') view === 'walk' ? exitWalk() : unfocus();
@@ -308,6 +432,8 @@ renderer.setAnimationLoop((timestamp) => {
   const now = Date.now();
 
   updateFlight(dt);
+  // Back from a board close-up: restore the overview's limit once we're out.
+  if (!focusedBoard && !flight && controls.maxPolarAngle !== ORBIT_MAX_POLAR) controls.maxPolarAngle = ORBIT_MAX_POLAR;
   if (view === 'orbit') {
     controls.target.set(clamp(controls.target.x, ROOM.minX, ROOM.maxX), clamp(controls.target.y, 0, 3), clamp(controls.target.z, ROOM.minZ, ROOM.maxZ));
     controls.update();
@@ -327,12 +453,12 @@ renderer.setAnimationLoop((timestamp) => {
 
   // Whatever the crosshair is on, within arm's reach of a few metres.
   if (view === 'walk' && walker.locked && !flight && ++aimFrame % 3 === 0) {
-    aimed = agentAt(CENTER, 7);
-    setHovered(aimed);
+    aimed = pick(CENTER, 7);
+    setPointed(aimed);
     hud.setAim(aimed);
   } else if (view === 'walk' && !walker.locked && aimed) {
     aimed = null;
-    setHovered(null);
+    setPointed(null);
     hud.setAim(null);
   }
 
@@ -345,9 +471,9 @@ renderer.setAnimationLoop((timestamp) => {
   if (slowTimer <= 0) {
     slowTimer = 0.5;
     const agents = manager.list();
-    world.room.dashboard.draw(agents, now, feed.state === 'offline' ? 'offline' : 'live');
-    world.room.whiteboard.draw(agents, manager.done);
-    hud.update(agents, feed.state, now);
+    world.room.dashboard.draw(agents, now, { offline: feed.state === 'offline', today: today.data });
+    world.room.whiteboard.draw(today.data, agents, now);
+    hud.update(agents, feed.state, now, today.data);
   }
 
   ink.render();
@@ -356,5 +482,5 @@ renderer.setAnimationLoop((timestamp) => {
 
 // Handy for poking at things from the console while developing.
 if (import.meta.env.DEV) {
-  Object.assign(window, { meeseeks: { scene, camera, controls, world, manager, feed, ink, walker, enterWalk, exitWalk } });
+  Object.assign(window, { meeseeks: { scene, camera, controls, world, manager, feed, today, ink, walker, enterWalk, exitWalk, focusBoard, act, pick } });
 }

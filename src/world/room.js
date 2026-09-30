@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { PALETTE, box, cyl, glow, mesh, noInk, rng, sphere, toon } from '../engine/toon.js';
 import { createPortal } from './portal.js';
-import { DashboardScreen, Whiteboard, glowTexture, labelTexture, neonSignTexture } from './screens.js';
+import { glowTexture, labelTexture, neonSignTexture } from './screens.js';
+import { MissionControl } from './mission-control.js';
+import { RecapBoard } from './recap-board.js';
 
 // Rick's garage, now a seed-stage startup. A cut-away diorama: floor, back
 // wall and left wall; the open sides face the camera.
@@ -52,30 +54,32 @@ export function buildRoom(scene) {
   solidBox(6.05, -4.0, 3.8, 2.0);
 
   // Back wall: TV dashboard, neon sign, whiteboard, coffee bar ------------
-  const dashboard = new DashboardScreen();
+  const dashboard = new MissionControl();
   const tv = new THREE.Group();
   tv.position.set(-1.4, 2.2, -5.95);
   tv.add(box(3.25, 1.88, 0.08, '#1e2126', 0, 0, 0));
   const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 1.74), new THREE.MeshBasicMaterial({ map: dashboard.texture, toneMapped: false }));
   tvScreen.position.z = 0.045;
+  tvScreen.userData.board = dashboard;
   tv.add(tvScreen);
   room.add(tv);
   const tvLight = new THREE.PointLight('#7fd6ff', 2.2, 5, 1.8);
   tvLight.position.set(-1.4, 2.0, -5.0);
   room.add(tvLight);
 
-  const whiteboard = new Whiteboard();
+  const whiteboard = new RecapBoard();
   const wb = new THREE.Group();
-  wb.position.set(-5.6, 1.45, -5.96);
-  wb.add(box(2.5, 1.4, 0.05, '#b4bac2', 0, 0, 0));
-  const wbFace = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.3), new THREE.MeshBasicMaterial({ map: whiteboard.texture }));
+  wb.position.set(-5.6, 1.42, -5.96);
+  wb.add(box(2.8, 1.6, 0.05, '#b4bac2', 0, 0, 0));
+  const wbFace = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 1.5), new THREE.MeshBasicMaterial({ map: whiteboard.texture }));
   wbFace.position.z = 0.028;
+  wbFace.userData.board = whiteboard;
   wb.add(wbFace);
-  wb.add(box(1.4, 0.04, 0.1, '#b4bac2', 0, -0.72, 0.05));
+  wb.add(box(1.4, 0.04, 0.1, '#b4bac2', 0, -0.82, 0.05));
   ['#c0392b', '#2980b9', '#27ae60'].forEach((c, i) => {
     const pen = cyl(0.012, 0.012, 0.13, c, 8);
     pen.rotation.z = Math.PI / 2;
-    pen.position.set(-0.3 + i * 0.16, -0.69, 0.06);
+    pen.position.set(-0.3 + i * 0.16, -0.79, 0.06);
     wb.add(pen);
   });
   room.add(wb);
@@ -87,7 +91,7 @@ export function buildRoom(scene) {
   neonFace.position.z = 0.03;
   neon.add(noInk(neonFace));
   room.add(neon);
-  const neonLight = new THREE.PointLight('#ff5fa2', 2.5, 4.5, 1.8);
+  const neonLight = new THREE.PointLight('#ff5fa2', 2.3, 4.5, 1.8);
   neonLight.position.set(-5.6, 2.6, -5.2);
   room.add(neonLight);
 
@@ -154,12 +158,12 @@ export function buildRoom(scene) {
     dashboard,
     whiteboard,
     tvScreen,
+    wbFace,
     setEnclosed(on) {
       enclosure.visible = on;
     },
     update(dt, t) {
       for (const u of updaters) u(dt, t);
-      neonLight.intensity = 2.3 + (Math.sin(t * 13) > 0.97 ? -1.5 : 0);
     },
   };
 }

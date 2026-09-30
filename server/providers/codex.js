@@ -7,30 +7,62 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { follow } from '../follow.js';
+import { addTokens, endTurn, isTestCommand, journalSummary, newJournal, noteEdit, noteTest, promptTurn, startTurn, touchTurn } from '../journal.js';
 import { MAX_ACTIVITY, MIN, SLEEP_AFTER_MS, base, clip, envNumber, ms, pruneMap, pushActivity, readHead, sessionStatus } from '../util.js';
 
 const exec = promisify(execFile);
 const CODEX_DIR = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_WINDOW_MS = envNumber('MEESEEKS_CODEX_WINDOW_MIN', 45) * MIN;
 
-function describeCall(name, args) {
-  const raw = typeof args === 'string' ? args : JSON.stringify(args || {});
-  const patch = raw.match(/\*\*\* (Update|Add|Delete) File: ([^\\\n"]+)/);
-  if (patch) return { icon: patch[1] === 'Add' ? '📝' : '✏️', text: `${patch[1] === 'Add' ? 'Writing' : patch[1] === 'Delete' ? 'Deleting' : 'Editing'} ${base(patch[2])}` };
-  const cmd = raw.match(/\\?"(?:cmd|command)\\?"\s*:\s*\\?"((?:[^"\\]|\\.)*?)\\?"/);
-  if (cmd) {
-    const c = cmd[1].replace(/\\\\n|\\n/g, ' ').replace(/\\+"/g, '"');
-    return { icon: '⌨️', text: `$ ${clip(c, 90)}`, cmd: clip(c, 200) };
+/** The raw text of a call's arguments, whatever shape this Codex version logs. */
+function rawArgs(args) {
+  return typeof args === 'string' ? args : JSON.stringify(args || {});
+}
+
+// Shell commands appear as {"command": ["bash", "-lc", "..."]} or {"cmd": "..."}
+// in older rollouts, and inside JS like tools.exec_command({cmd: "..."}) in newer.
+function commandOf(raw) {
+  const str = raw.match(/(?:\bcmd|"cmd"|\\"cmd\\")\s*:\s*("(?:[^"\\]|\\.)*")/)?.[1];
+  if (str) {
+    try { return JSON.parse(str); } catch { return str.slice(1, -1); }
   }
+  const list = raw.match(/"command"\s*:\s*(\[(?:[^\]"]|"(?:[^"\\]|\\.)*")*\])/)?.[1];
+  if (list) {
+    try { const argv = JSON.parse(list); return String(argv.at(-1) || ''); } catch { /* fall through */ }
+  }
+  return '';
+}
+
+const PATCH_FILE = /\*\*\* (Update|Add|Delete) File: ([^\n\\"'`]+)/g;
+
+function describeCall(name, args) {
+  const raw = rawArgs(args);
+  const patch = PATCH_FILE.exec(raw);
+  PATCH_FILE.lastIndex = 0;
+  if (patch) return { icon: patch[1] === 'Add' ? '📝' : '✏️', text: `${patch[1] === 'Add' ? 'Writing' : patch[1] === 'Delete' ? 'Deleting' : 'Editing'} ${base(patch[2].trim())}` };
+  const cmd = commandOf(raw).replace(/\s+/g, ' ').trim();
+  if (cmd) return { icon: '⌨️', text: `$ ${clip(cmd, 90)}`, cmd: clip(cmd, 200) };
+  // Newer Codex wraps every tool in a JS `exec` call: name it by what it calls.
+  if (name === 'exec') name = raw.match(/tools\.(\w+)/)?.[1] || name;
+  if (name.startsWith('mcp__')) return { icon: '🔧', text: clip(name.split('__').slice(1).join(' · '), 80) };
   switch (name) {
     case 'spawn_agent': return { icon: '🧬', text: 'Summoning a helper agent' };
     case 'wait_agent':
     case 'wait': return { icon: '⏳', text: 'Waiting on helpers' };
     case 'update_plan': return { icon: '✅', text: 'Updating the plan' };
     case 'view_image': return { icon: '🖼️', text: 'Looking at an image' };
-    case 'web_search': return { icon: '🌐', text: 'Searching the web' };
+    case 'web_search':
+    case 'web__run': return { icon: '🌐', text: 'Searching the web' };
+    case 'image_gen__imagegen': return { icon: '🎨', text: 'Generating an image' };
+    case 'exec': return { icon: '⌨️', text: 'Running a script' };
     default: return { icon: '🔧', text: clip(name, 80) };
   }
+}
+
+function outputText(output) {
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output)) return output.map((o) => o?.text || '').join('\n');
+  return output?.output || output?.content || '';
 }
 
 const NOISE = /^(<environment_context|<user_instructions|<permissions|<turn_aborted|# AGENTS\.md|<INSTRUCTIONS>|<collaboration)/;
@@ -42,7 +74,10 @@ function contentText(content) {
 }
 
 export const codexReducer = {
-  init: () => ({ activity: [], helpers: new Set(), busy: false, turnStartedAt: 0, lastAt: 0, model: '', context: 0, total: 0, firstPrompt: '', branch: '' }),
+  init: () => ({
+    activity: [], helpers: new Set(), tests: new Map(), journal: newJournal(), busy: false, turnStartedAt: 0, lastAt: 0,
+    model: '', context: 0, total: 0, lastTotal: null, firstPrompt: '', branch: '', lastSay: null, limits: null,
+  }),
 
   feed(st, r) {
     const ts = ms(r.timestamp);
@@ -51,12 +86,29 @@ export const codexReducer = {
     if (r.type === 'turn_context' && p.model) st.model = p.model;
     if (r.type === 'session_meta' && p.git?.branch) st.branch = p.git.branch;
 
+    const j = st.journal;
+
     if (r.type === 'event_msg') {
-      if (p.type === 'task_started') { st.busy = true; st.turnStartedAt = ts; }
-      else if (p.type === 'task_complete' || p.type === 'turn_aborted') { st.busy = false; st.helpers.clear(); }
-      else if (p.type === 'token_count' && p.info) {
-        st.total = p.info.total_token_usage?.total_tokens || st.total;
-        st.context = p.info.last_token_usage?.input_tokens || st.context;
+      if (p.type === 'task_started') {
+        st.busy = true;
+        st.turnStartedAt = ts;
+        startTurn(j, ts, '');
+      } else if (p.type === 'task_complete' || p.type === 'turn_aborted') {
+        st.busy = false;
+        st.helpers.clear();
+        endTurn(j, ts);
+        if (p.last_agent_message) st.lastSay = { ts, text: clip(p.last_agent_message, 400) };
+      } else if (p.type === 'token_count') {
+        if (p.info) {
+          const total = p.info.total_token_usage?.total_tokens || 0;
+          // Totals are cumulative; today's share is what they grew by today.
+          const before = st.lastTotal ?? total - (p.info.last_token_usage?.total_tokens || 0);
+          if (total > before) addTokens(j, ts, total - before);
+          if (total) st.lastTotal = total;
+          st.total = total || st.total;
+          st.context = p.info.last_token_usage?.input_tokens || st.context;
+        }
+        if (p.rate_limits?.primary || p.rate_limits?.secondary) st.limits = { at: ts, ...p.rate_limits };
       } else if (p.type === 'thread_settings_applied' && p.thread_settings?.model) st.model = p.thread_settings.model;
     }
 
@@ -66,16 +118,35 @@ export const codexReducer = {
         if (!text || NOISE.test(text)) return;
         if (p.role === 'user') {
           st.firstPrompt ||= text;
+          promptTurn(j, ts, text);
           pushActivity(st.activity, { ts, kind: 'prompt', icon: '🧑', text: clip(text, 160) });
         } else if (p.role === 'assistant') {
+          touchTurn(j, ts);
+          st.lastSay = { ts, text: clip(text, 400) };
           pushActivity(st.activity, { ts, kind: 'say', icon: '💬', text: clip(text, 160) });
         }
       } else if (p.type === 'reasoning') {
+        touchTurn(j, ts);
         pushActivity(st.activity, { ts, kind: 'think', icon: '🤔', text: 'Thinking…' });
       } else if (p.type === 'function_call' || p.type === 'custom_tool_call' || p.type === 'local_shell_call') {
         const name = p.name || 'shell';
+        const args = p.arguments ?? p.input ?? p.action;
+        const raw = rawArgs(args);
+        touchTurn(j, ts);
         if (name === 'spawn_agent') st.helpers.add(p.call_id || ts);
-        pushActivity(st.activity, { ts, kind: 'tool', tool: name, ...describeCall(name, p.arguments ?? p.input ?? p.action) });
+        for (const m of raw.matchAll(PATCH_FILE)) noteEdit(j, m[2].trim(), ts);
+        const cmd = commandOf(raw);
+        if (p.call_id && isTestCommand(cmd)) st.tests.set(p.call_id, cmd);
+        pushActivity(st.activity, { ts, kind: 'tool', tool: name, ...describeCall(name, args) });
+      } else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output' || p.type === 'local_shell_call_output') {
+        touchTurn(j, ts);
+        const cmd = st.tests.get(p.call_id);
+        if (cmd) {
+          st.tests.delete(p.call_id);
+          const out = outputText(p.output);
+          const exitCode = Number(String(out).match(/"exit_code"\s*:\s*(\d+)/)?.[1] ?? NaN);
+          noteTest(j, ts, cmd, out, Number.isFinite(exitCode) ? { exitCode } : {});
+        }
       }
     }
   },
@@ -100,7 +171,10 @@ export const codexReducer = {
     firstPrompt: st.firstPrompt,
     branch: st.branch,
     helpers: st.helpers.size,
+    lastMessage: st.lastSay,
+    limits: st.limits,
     activity: st.activity.slice(-MAX_ACTIVITY),
+    journal: st.journal,
   }),
 };
 
@@ -150,7 +224,8 @@ async function codexRunning(now) {
   return running;
 }
 
-async function recentRollouts(now) {
+/** Rollouts touched since `since`, newest first. */
+async function rolloutsSince(since, now) {
   const root = path.join(CODEX_DIR, 'sessions');
   const out = [];
   // Rollouts are filed by start date, but long sessions keep writing to old
@@ -162,15 +237,17 @@ async function recentRollouts(now) {
     try { files = await fsp.readdir(dir); } catch { continue; }
     for (const f of files) {
       if (!f.endsWith('.jsonl')) continue;
-      const p = path.join(dir, f);
+      const file = path.join(dir, f);
       try {
-        const st = await fsp.stat(p);
-        if (now - st.mtimeMs < CODEX_WINDOW_MS) out.push(p);
+        const { mtimeMs } = await fsp.stat(file);
+        if (mtimeMs >= since) out.push({ file, mtimeMs });
       } catch { /* vanished */ }
     }
   }
-  return out;
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
+
+const recentRollouts = async (now) => (await rolloutsSince(now - CODEX_WINDOW_MS, now)).map((r) => r.file);
 
 export async function scanCodex(now) {
   if (!(await codexRunning(now))) return [];
@@ -205,9 +282,50 @@ export async function scanCodex(now) {
       helpers: busy ? info.helpers : 0,
       entrypoint: meta.originator || meta.source || '',
       version: meta.cliVersion || '',
+      lastMessage: info.lastMessage || null,
+      ask: null,
       activity: info.activity || [],
     });
   }
-  pruneMap(metaCache, new Set(rollouts));
   return sessions;
+}
+
+/**
+ * Every rollout that did something since `since`, plus the latest usage limits
+ * Codex reported this week (read from the newest rollout even if it's older).
+ */
+export async function codexToday(since, now) {
+  const threadTitles = await loadTitles();
+  const week = await rolloutsSince(now - 7 * 86_400_000, now);
+  const sessions = [];
+  let limits = null;
+  for (const [i, { file, mtimeMs }] of week.entries()) {
+    if (mtimeMs < since && i > 0) break;
+    const meta = await readMeta(file).catch(() => null);
+    if (!meta?.id) continue;
+    const info = await follow(file, codexReducer).catch(() => null);
+    if (!info) continue;
+    if (info.limits && (!limits || info.limits.at > limits.at)) limits = info.limits;
+    if (mtimeMs < since) continue;
+    const day = journalSummary(info.journal, since);
+    if (!day.turns.length && !day.tokens) continue;
+    sessions.push({
+      id: `codex:${meta.id}`,
+      provider: 'codex',
+      cwd: meta.cwd,
+      title: threadTitles.get(meta.id) || clip(info.firstPrompt, 60) || base(meta.cwd),
+      lastAt: Math.max(info.lastAt || 0, mtimeMs),
+      ...day,
+    });
+  }
+  pruneMap(metaCache, new Set(week.map((r) => r.file)));
+  // Codex logs its limits with every response, so a window that reset since
+  // the last reading really is unused (`live`).
+  return { sessions, limits: limits && { at: limits.at, live: true, windows: [limits.primary, limits.secondary].filter(Boolean).map(limitWindow) } };
+}
+
+function limitWindow(w) {
+  const minutes = Number(w.window_minutes) || 0;
+  const name = minutes === 10080 ? 'week' : minutes >= 60 ? `${Math.round(minutes / 60)}h` : `${minutes}m`;
+  return { name, usedPercent: Number(w.used_percent) || 0, resetsAt: (Number(w.resets_at) || 0) * 1000 };
 }

@@ -7,10 +7,13 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { follow } from '../follow.js';
+import { addTokens, endTurn, isTestCommand, journalSummary, newJournal, noteEdit, noteRecap, noteTest, startTurn, touchTurn } from '../journal.js';
 import { MAX_ACTIVITY, base, clip, grab, ms, pruneMap, pushActivity, sessionStatus } from '../util.js';
 
 const exec = promisify(execFile);
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+// Global settings live next to ~/.claude, or inside CLAUDE_CONFIG_DIR when set.
+const CONFIG_FILE = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(os.homedir(), '.claude.json');
 
 function describeTool(name, input = {}) {
   const i = input || {};
@@ -39,47 +42,107 @@ function describeTool(name, input = {}) {
 }
 
 const NOISE = /^(<command-|<local-command|<system-reminder|<task-notification|\[Request interrupted|Caveat:)/;
+const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
+
+function textParts(content) {
+  if (typeof content === 'string') return [content];
+  return Array.isArray(content) ? content.filter((c) => c?.type === 'text').map((c) => String(c.text)) : [];
+}
 
 // Harness-injected parts (reminders, command echoes) are not the user talking.
 function userText(content) {
-  const parts = typeof content === 'string' ? [content] : Array.isArray(content) ? content.filter((c) => c?.type === 'text').map((c) => c.text) : [];
-  return parts.map((t) => String(t).trim()).filter((t) => t && !NOISE.test(t)).join(' ');
+  return textParts(content).map((t) => t.trim()).filter((t) => t && !NOISE.test(t)).join(' ');
+}
+
+function resultText(content) {
+  return typeof content === 'string' ? content : textParts(content).join('\n');
+}
+
+/** What a pending tool call is waiting for, if you're the one it waits on. */
+function askOf(name, input = {}) {
+  if (name === 'AskUserQuestion') return { kind: 'question', text: clip(input?.questions?.[0]?.question || 'Has a question for you', 300) };
+  if (name === 'ExitPlanMode') return { kind: 'plan', text: 'Wants you to approve a plan' };
+  const d = describeTool(name, input);
+  return { kind: 'tool', text: d.cmd ? `$ ${d.cmd}` : d.text };
 }
 
 export const claudeReducer = {
-  init: () => ({ activity: [], pending: new Map(), title: '', lastPrompt: '', model: '', branch: '', turnStartedAt: 0, lastAt: 0, context: 0, outTokens: 0 }),
+  init: () => ({
+    activity: [], pending: new Map(), tests: new Map(), usageIds: [], journal: newJournal(),
+    title: '', lastPrompt: '', model: '', branch: '', cwd: '', lastSay: null,
+    turnStartedAt: 0, lastAt: 0, context: 0, outTokens: 0,
+  }),
 
   feed(st, r) {
     const ts = ms(r.timestamp);
     if (ts) st.lastAt = Math.max(st.lastAt, ts);
     if (r.gitBranch) st.branch = r.gitBranch;
+    if (r.cwd) st.cwd = r.cwd;
     if (r.type === 'ai-title' && r.aiTitle) st.title = r.aiTitle;
     if (r.type === 'last-prompt' && r.lastPrompt) st.lastPrompt = r.lastPrompt;
+    // Sidechain rows in a main transcript belong to a subagent; in a subagent's
+    // own log every row is one, and that log is all we read.
+    if (r.isSidechain && !st.subagent) return;
+    const j = st.journal;
+
+    if (r.type === 'system') {
+      if (r.subtype === 'turn_duration') endTurn(j, ts);
+      else if (r.subtype === 'away_summary' && typeof r.content === 'string') noteRecap(j, ts, r.content);
+      return;
+    }
 
     if (r.type === 'user' && r.message) {
       const c = r.message.content;
-      if (Array.isArray(c)) for (const part of c) if (part?.type === 'tool_result') st.pending.delete(part.tool_use_id);
+      if (Array.isArray(c)) {
+        for (const part of c) {
+          if (part?.type !== 'tool_result') continue;
+          st.pending.delete(part.tool_use_id);
+          touchTurn(j, ts);
+          const test = st.tests.get(part.tool_use_id);
+          if (test) {
+            st.tests.delete(part.tool_use_id);
+            noteTest(j, ts, test, resultText(part.content), { isError: part.is_error });
+          }
+        }
+      }
       const text = userText(c).trim();
       if (text && !r.isMeta && !r.isCompactSummary) {
         st.turnStartedAt = ts || st.turnStartedAt;
+        startTurn(j, ts, text);
         pushActivity(st.activity, { ts, kind: 'prompt', icon: '🧑', text: clip(text, 160) });
+      } else if (textParts(c).some((t) => t.trimStart().startsWith('<task-notification'))) {
+        startTurn(j, ts, '🔔 A background task reported back');
       }
     }
 
     if (r.type === 'assistant' && r.message) {
       const m = r.message;
+      touchTurn(j, ts, true);
       if (m.model && !m.model.startsWith('<')) st.model = m.model;
-      if (m.usage) {
+      // One API response is logged as several rows (one per content block),
+      // each repeating the same usage: count it once.
+      if (m.usage && !(m.id && st.usageIds.includes(m.id))) {
         const u = m.usage;
-        st.context = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+        const input = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+        st.context = input;
         st.outTokens += u.output_tokens || 0;
+        addTokens(j, ts, input + (u.output_tokens || 0));
+        if (m.id) {
+          st.usageIds.push(m.id);
+          if (st.usageIds.length > 16) st.usageIds.shift();
+        }
       }
       for (const part of m.content || []) {
         if (part.type === 'thinking') pushActivity(st.activity, { ts, kind: 'think', icon: '🤔', text: 'Thinking…' });
-        else if (part.type === 'text' && part.text?.trim()) pushActivity(st.activity, { ts, kind: 'say', icon: '💬', text: clip(part.text, 160) });
-        else if (part.type === 'tool_use') {
-          st.pending.set(part.id, part.name);
-          pushActivity(st.activity, { ts, kind: 'tool', tool: part.name, ...describeTool(part.name, part.input) });
+        else if (part.type === 'text' && part.text?.trim()) {
+          st.lastSay = { ts, text: clip(part.text, 400) };
+          pushActivity(st.activity, { ts, kind: 'say', icon: '💬', text: clip(part.text, 160) });
+        } else if (part.type === 'tool_use') {
+          const input = part.input || {};
+          st.pending.set(part.id, { name: part.name, ...askOf(part.name, input) });
+          if (EDIT_TOOLS.has(part.name)) noteEdit(j, input.file_path || input.notebook_path, ts);
+          if (part.name === 'Bash' && isTestCommand(input.command)) st.tests.set(part.id, input.command);
+          pushActivity(st.activity, { ts, kind: 'tool', tool: part.name, ...describeTool(part.name, input) });
         }
       }
     }
@@ -91,31 +154,42 @@ export const claudeReducer = {
     const head = line.slice(0, 4000);
     const type = head.match(/"type":"(user|assistant)"/)?.[1];
     if (!type) return null;
-    const timestamp = line.slice(-1000).match(/"timestamp":"([^"]+)"/)?.[1];
+    const tail = line.slice(-1000);
+    const timestamp = tail.match(/"timestamp":"([^"]+)"/)?.[1];
+    const isSidechain = /"isSidechain":true/.test(head) || /"isSidechain":true/.test(tail);
     if (type === 'user') {
-      const ids = [...line.matchAll(/"tool_use_id":"([^"]+)"/g)].map((m) => ({ type: 'tool_result', tool_use_id: m[1] }));
-      if (ids.length) return { type, timestamp, message: { content: ids } };
+      const isError = /"is_error":true/.test(line) ? true : undefined;
+      const ids = [...line.matchAll(/"tool_use_id":"([^"]+)"/g)].map((m) => ({ type: 'tool_result', tool_use_id: m[1], is_error: isError }));
+      if (ids.length) return { type, timestamp, isSidechain, message: { content: ids } };
       const text = grab(head, /"type":"text","text":"((?:[^"\\]|\\.){1,400})/);
-      return { type, timestamp, message: { content: [{ type: 'text', text: `🖼️ ${text || '(attachment)'}` }] } };
+      return { type, timestamp, isSidechain, message: { content: [{ type: 'text', text: `🖼️ ${text || '(attachment)'}` }] } };
     }
     const id = head.match(/"type":"tool_use","id":"([^"]+)"/)?.[1];
     const name = head.match(/"type":"tool_use","id":"[^"]+","name":"([^"]+)"/)?.[1];
-    if (!id || !name) return { type, timestamp, message: { content: [] } };
-    return { type, timestamp, message: { content: [{ type: 'tool_use', id, name, input: { file_path: grab(head, /"file_path":"((?:[^"\\]|\\.)+)"/) } }] } };
+    if (!id || !name) return { type, timestamp, isSidechain, message: { content: [] } };
+    return { type, timestamp, isSidechain, message: { content: [{ type: 'tool_use', id, name, input: { file_path: grab(head, /"file_path":"((?:[^"\\]|\\.)+)"/) } }] } };
   },
 
-  summary: (st) => ({
-    title: st.title,
-    lastPrompt: st.lastPrompt,
-    model: st.model,
-    branch: st.branch,
-    turnStartedAt: st.turnStartedAt,
-    lastAt: st.lastAt,
-    context: st.context,
-    outTokens: st.outTokens,
-    helpers: [...st.pending.values()].filter((n) => n === 'Agent' || n === 'Task').length,
-    activity: st.activity.slice(-MAX_ACTIVITY),
-  }),
+  summary: (st) => {
+    const pending = [...st.pending.values()];
+    const ask = pending.filter((p) => p.name !== 'Agent' && p.name !== 'Task').at(-1);
+    return {
+      title: st.title,
+      lastPrompt: st.lastPrompt,
+      model: st.model,
+      branch: st.branch,
+      cwd: st.cwd,
+      turnStartedAt: st.turnStartedAt,
+      lastAt: st.lastAt,
+      context: st.context,
+      outTokens: st.outTokens,
+      helpers: pending.filter((p) => p.name === 'Agent' || p.name === 'Task').length,
+      lastMessage: st.lastSay,
+      ask: ask ? { kind: ask.kind, text: ask.text } : null,
+      activity: st.activity.slice(-MAX_ACTIVITY),
+      journal: st.journal,
+    };
+  },
 };
 
 const transcriptPaths = new Map();
@@ -203,10 +277,100 @@ export async function scanClaude(now) {
       helpers: busy ? info.helpers || 0 : 0,
       entrypoint: reg.entrypoint || '',
       version: reg.version || '',
+      lastMessage: info.lastMessage || null,
+      ask: busy ? null : info.ask || null,
       activity: info.activity || [],
     });
   }
   pruneMap(transcriptPaths, seenIds);
   pruneMap(pidVerdicts, seenPids);
   return sessions;
+}
+
+async function listDir(dir) {
+  try { return await fsp.readdir(dir); } catch { return []; }
+}
+
+async function mtime(file) {
+  try { return (await fsp.stat(file)).mtimeMs; } catch { return 0; }
+}
+
+const subagentReducer = { ...claudeReducer, init: () => ({ ...claudeReducer.init(), subagent: true }) };
+
+/**
+ * Every session that did something since `since`, running or not. A session's
+ * subagents log to their own files; their tokens count toward the session.
+ */
+export async function claudeToday(since) {
+  const projects = path.join(CLAUDE_DIR, 'projects');
+  const sessions = [];
+  for (const dir of await listDir(projects)) {
+    const folder = path.join(projects, dir);
+    for (const f of await listDir(folder)) {
+      if (!f.endsWith('.jsonl')) continue;
+      const file = path.join(folder, f);
+      if ((await mtime(file)) < since) continue;
+      const info = await follow(file, claudeReducer).catch(() => null);
+      if (!info) continue;
+      const day = journalSummary(info.journal, since);
+      const id = f.slice(0, -'.jsonl'.length);
+      let tokens = day.tokens;
+      const subDir = path.join(folder, id, 'subagents');
+      for (const sub of await listDir(subDir)) {
+        const subFile = path.join(subDir, sub);
+        if (!sub.endsWith('.jsonl') || (await mtime(subFile)) < since) continue;
+        const subInfo = await follow(subFile, subagentReducer).catch(() => null);
+        if (subInfo) tokens += journalSummary(subInfo.journal, since).tokens;
+      }
+      if (!day.turns.length && !tokens) continue;
+      sessions.push({
+        id: `claude:${id}`,
+        provider: 'claude',
+        cwd: info.cwd,
+        title: info.title || clip(info.lastPrompt, 60) || base(info.cwd),
+        lastAt: info.lastAt,
+        ...day,
+        tokens,
+      });
+    }
+  }
+  return sessions;
+}
+
+const LIMIT_NAMES = { session: '5h', weekly_all: 'week' };
+function limitName(kind) {
+  if (LIMIT_NAMES[kind]) return LIMIT_NAMES[kind];
+  const m = /^weekly_(\w+)$/.exec(kind || '');
+  return m ? `week ${m[1][0].toUpperCase()}${m[1].slice(1)}` : String(kind || '?');
+}
+
+// Claude Code only refreshes the snapshot when it fetches your usage (running
+// /usage does), and itself stops trusting it after an hour.
+const LIMITS_TRUSTED_MS = 3_600_000;
+
+let limitsCache = { key: '', value: null };
+/**
+ * Your plan's usage limits, as Claude Code last fetched them. It caches them
+ * in its global config (cachedUsageUtilization); only that block is read. It's
+ * a snapshot: `at` says when it was taken, `staleAt` when to stop trusting it.
+ */
+export async function claudeLimits() {
+  let st;
+  try { st = await fsp.stat(CONFIG_FILE); } catch { return null; }
+  const key = `${st.mtimeMs}:${st.size}`;
+  if (limitsCache.key === key) return limitsCache.value;
+  let value = null;
+  try {
+    const cached = JSON.parse(await fsp.readFile(CONFIG_FILE, 'utf8')).cachedUsageUtilization;
+    const u = cached?.utilization;
+    if (u) {
+      const windows = Array.isArray(u.limits) && u.limits.length
+        ? u.limits.map((l) => ({ name: limitName(l.kind), usedPercent: Number(l.percent) || 0, resetsAt: Date.parse(l.resets_at) || 0 }))
+        : [['5h', u.five_hour], ['week', u.seven_day]].filter(([, w]) => w).map(([name, w]) => ({ name, usedPercent: Number(w.utilization) || 0, resetsAt: Date.parse(w.resets_at) || 0 }));
+      const at = Number(cached.fetchedAtMs) || 0;
+      value = { at, staleAt: at + LIMITS_TRUSTED_MS, live: false, windows };
+    }
+  } catch { /* caught mid-write: the next change retries */ }
+  limitsCache = { key, value };
+  return value;
 }

@@ -6,8 +6,6 @@ import { Agent } from './agent.js';
 
 const GRACE_MS = 5000;
 const SPAWN_STAGGER_S = 1.3;
-// The whiteboard's DONE column shows the last few finished sessions.
-const DONE_KEPT = 4;
 
 export class AgentManager {
   constructor(world, { onEvent, onClick } = {}) {
@@ -18,7 +16,6 @@ export class AgentManager {
     this.onClick = onClick;
     this.queue = [];
     this.spawnCooldown = 0;
-    this.done = [];
   }
 
   sync(sessions, now) {
@@ -42,8 +39,6 @@ export class AgentManager {
       agent.missingSince ||= now;
       if (now - agent.missingSince > GRACE_MS) {
         agent.leave();
-        this.done.push(agent.session.title);
-        if (this.done.length > DONE_KEPT) this.done.shift();
         this.onEvent('leave', agent);
       }
     }
