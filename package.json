@@ -1,0 +1,31 @@
+{
+  "name": "meeseeks-box",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cartoon 3D office where your Claude Code and Codex agent sessions go to work.",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/J4NN0/meeseeks.git"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "serve": "vite build && node server/index.js"
+  },
+  "dependencies": {
+    "@fontsource/luckiest-guy": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
+    "@fontsource/patrick-hand": "^5.3.0",
+    "@fontsource/permanent-marker": "^5.3.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.1"
+  }
+}
