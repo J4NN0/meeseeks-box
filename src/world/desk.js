@@ -8,6 +8,8 @@ import { TerminalScreen } from './screens.js';
 
 const DESK_H = 0.74;
 const CHAIR_Z = 0.66;
+const KEYBOARD_Z = 0.14;
+const KEY_TOP = DESK_H + 0.054;
 const CHAIR_COLORS = ['#2f3640', '#e17055', '#00a8a8', '#6c5ce7', '#fdcb6e', '#2d3436'];
 const TOP_COLORS = ['#efe9dc', '#c89560', '#efe9dc', '#d7c29a'];
 
@@ -44,8 +46,8 @@ export class Desk {
     this.screenMesh = screen;
 
     // Keyboard and mouse.
-    root.add(box(0.46, 0.022, 0.15, '#3b3f45', 0, DESK_H + 0.035, 0.14));
-    root.add(box(0.42, 0.008, 0.11, '#d7dbe0', 0, DESK_H + 0.05, 0.14, { cast: false }));
+    root.add(box(0.46, 0.022, 0.15, '#3b3f45', 0, DESK_H + 0.035, KEYBOARD_Z));
+    root.add(box(0.42, 0.008, 0.11, '#d7dbe0', 0, KEY_TOP - 0.004, KEYBOARD_Z, { cast: false }));
     const mouse = sphere(0.035, '#d7dbe0', 12);
     mouse.scale.set(0.8, 0.45, 1.2);
     mouse.position.set(0.36, DESK_H + 0.035, 0.14);
@@ -173,4 +175,4 @@ export class Desk {
   }
 }
 
-export { DESK_H, CHAIR_Z };
+export { DESK_H, CHAIR_Z, KEYBOARD_Z, KEY_TOP };

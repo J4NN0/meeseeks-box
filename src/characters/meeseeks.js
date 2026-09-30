@@ -1,12 +1,36 @@
 import * as THREE from 'three';
 import { mesh, ownToon, rng } from '../engine/toon.js';
-import { CharacterBase, joint, limb } from './rig.js';
+import { CharacterBase, joint, limb, solveArm } from './rig.js';
+import { CHAIR_Z, KEYBOARD_Z, KEY_TOP } from '../world/desk.js';
 
 // Mr. Meeseeks: tall, lanky, big round head, one tuft of hair.
 // Local space: feet on y = 0, facing +z.
 
 const HIP_STAND = 0.82;
 const HIP_SIT = 0.47;
+const CHEST_Y = 0.02;
+const SHOULDER = { x: 0.15, y: 0.43 };
+const UPPER_ARM = 0.31;
+const FOREARM = 0.29;
+
+// The palms go just short of the keyboard centre, KEYS_Z in front of the
+// seat, with their centres PALM above the key tops.
+const KEYS_Z = CHAIR_Z - KEYBOARD_Z - 0.01;
+const PALM = 0.031;
+// Too short for the desk to keep its elbows down, so they stick out sideways.
+const ELBOW_POLE = new THREE.Vector3(0.9, -0.2, -0.3);
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const UP = new THREE.Vector3(0, 1, 0);
+const _target = new THREE.Vector3();
+const _pole = new THREE.Vector3();
+const _back = new THREE.Vector3();
+const _side = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _qArm = new THREE.Quaternion();
+const _qJoint = new THREE.Quaternion();
+const _basis = new THREE.Matrix4();
+const _euler = new THREE.Euler();
 const ACCESSORIES = ['none', 'headphones', 'beanie', 'cap', 'glasses', 'none', 'headphones', 'tie'];
 
 export class Meeseeks extends CharacterBase {
@@ -45,7 +69,7 @@ export class Meeseeks extends CharacterBase {
     });
 
     // Torso ----------------------------------------------------------------
-    const chest = joint(hips, 0, 0.02, 0);
+    const chest = joint(hips, 0, CHEST_Y, 0);
     this.chest = chest;
     const profile = [
       [0, 0], [0.12, 0.01], [0.135, 0.08], [0.13, 0.2], [0.145, 0.33], [0.155, 0.42], [0.135, 0.5], [0.1, 0.56], [0, 0.6],
@@ -115,11 +139,11 @@ export class Meeseeks extends CharacterBase {
 
     // Arms -----------------------------------------------------------------
     this.arms = [-1, 1].map((s) => {
-      const shoulder = joint(chest, s * 0.15, 0.43, 0);
-      shoulder.add(limb(0.31, 0.034, skin));
-      const elbow = joint(shoulder, 0, -0.31, 0);
-      elbow.add(limb(0.28, 0.031, skin));
-      const hand = joint(elbow, 0, -0.29, 0);
+      const shoulder = joint(chest, s * SHOULDER.x, SHOULDER.y, 0);
+      shoulder.add(limb(UPPER_ARM, 0.034, skin));
+      const elbow = joint(shoulder, 0, -UPPER_ARM, 0);
+      elbow.add(limb(FOREARM - 0.01, 0.031, skin)); // stops short of the wrist
+      const hand = joint(elbow, 0, -FOREARM, 0);
       const palm = mesh(new THREE.SphereGeometry(0.052, 14, 10), skin);
       palm.scale.set(0.85, 1.15, 0.6);
       hand.add(palm);
@@ -201,6 +225,8 @@ export class Meeseeks extends CharacterBase {
     let eyeScale = blinking ? 0.1 : 1;
     let mouthOpen = 0.35;
     let speed = 10;
+    // Hands follow the forearm unless the pose (typing) says otherwise.
+    for (const { hand } of this.arms) p.rot(hand, 0, 0, 0);
 
     if (this.mode === 'walk') {
       this.walkPhase += dt * 9;
@@ -260,18 +286,15 @@ export class Meeseeks extends CharacterBase {
   sitPose(p, time, L, R) {
     const mood = this.mood;
     if (mood === 'work' || mood === 'think') {
-      const typeL = Math.sin(time * 17) * 0.06;
-      const typeR = Math.sin(time * 17 + 2.1) * 0.06;
       p.rot(this.chest, 0.16, 0, 0);
       p.rot(this.head, 0.12 + Math.sin(time * 3) * 0.02, Math.sin(time * 0.5) * 0.12, 0);
-      p.rot(L.shoulder, -0.72 + typeL, 0.22, -0.2).rot(L.elbow, -1.05 + typeL, 0, 0);
       if (mood === 'think') {
         // Hand on chin, head tilted: "hmm, what would Rick do?"
         p.rot(R.shoulder, -1.05, -0.35, 0.1).rot(R.elbow, -2.2, 0, 0);
         p.rot(this.head, 0.02, 0.1, 0.16).rot(this.chest, 0.08, 0, 0);
-        p.rot(L.shoulder, -0.72, 0.22, -0.2).rot(L.elbow, -1.05, 0, 0);
+        this.typePose(p, time, [L], { lean: 0.08, rate: 17, lift: 0 });
       } else {
-        p.rot(R.shoulder, -0.72 + typeR, -0.22, 0.2).rot(R.elbow, -1.05 + typeR, 0, 0);
+        this.typePose(p, time, [L, R], { lean: 0.16, rate: 17, lift: 0.02 });
       }
     } else if (mood === 'wait') {
       // Turned towards you, waving to get attention.
@@ -295,15 +318,46 @@ export class Meeseeks extends CharacterBase {
         p.rot(L.shoulder, -0.6, 0.2, -2.0).rot(L.elbow, -1.9, 0, 0);
         p.rot(R.shoulder, -0.6, -0.2, 2.0).rot(R.elbow, -1.9, 0, 0);
       } else {
-        const f = Math.sin(time * 30) * 0.12;
-        p.rot(this.chest, 0.28 + shake, 0, 0).rot(this.head, 0.22, 0, shake * 2);
-        p.rot(L.shoulder, -0.78 + f, 0.22, -0.2).rot(L.elbow, -1.0 + f, 0, 0);
-        p.rot(R.shoulder, -0.78 - f, -0.22, 0.2).rot(R.elbow, -1.0 - f, 0, 0);
+        p.rot(this.chest, 0.28, 0, 0).rot(this.head, 0.22, 0, shake * 2);
+        this.typePose(p, time, [L, R], { lean: 0.28, rate: 30, lift: 0.045 });
       }
     } else {
       p.rot(this.chest, 0.02, 0, 0).rot(this.head, 0, Math.sin(time * 0.6) * 0.4, 0);
       p.rot(L.shoulder, -0.4, 0, -0.18).rot(L.elbow, -0.7, 0, 0);
       p.rot(R.shoulder, -0.4, 0, 0.18).rot(R.elbow, -0.7, 0, 0);
+    }
+  }
+
+  /**
+   * Palms flat on the keyboard, tapping away. Solved with IK against the
+   * desk's keyboard so the hands land on the keys whatever the lean.
+   */
+  typePose(p, time, arms, { lean, rate, lift }) {
+    for (const { shoulder, elbow, hand, s } of arms) {
+      const phase = s > 0 ? 2.1 : 0;
+      const tap = Math.max(0, Math.sin(time * rate + phase)) ** 2 * lift;
+      // Where the palm goes, in the leaning chest's frame, relative to the shoulder.
+      _target.set(
+        s * 0.1 + Math.sin(time * 1.3 + phase) * 0.015,
+        KEY_TOP + PALM + tap - HIP_SIT - CHEST_Y,
+        KEYS_Z + Math.sin(time * 0.9 + phase) * 0.012,
+      ).applyAxisAngle(X_AXIS, -lean);
+      _target.x -= s * SHOULDER.x;
+      _target.y -= SHOULDER.y;
+      _pole.set(s * ELBOW_POLE.x, ELBOW_POLE.y, ELBOW_POLE.z);
+      const arm = solveArm(_target, _pole, UPPER_ARM, FOREARM);
+      p.rot(shoulder, arm.x, arm.y, arm.z).rot(elbow, arm.bend, 0, 0);
+
+      // Palm flat with the back of the hand up, fingers pointing at the keys
+      // and turned in a little, whatever angle the forearm arrives at.
+      _back.set(s * 0.3, 0, -1).normalize();
+      _side.crossVectors(_back, UP);
+      _q.setFromRotationMatrix(_basis.makeBasis(_side, _back, UP));
+      _qArm.setFromAxisAngle(X_AXIS, lean)
+        .multiply(_qJoint.setFromEuler(_euler.set(arm.x, arm.y, arm.z)))
+        .multiply(_qJoint.setFromAxisAngle(X_AXIS, arm.bend));
+      _euler.setFromQuaternion(_q.premultiply(_qArm.invert()));
+      p.rot(hand, _euler.x, _euler.y, _euler.z);
     }
   }
 }

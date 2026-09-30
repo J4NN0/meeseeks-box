@@ -18,6 +18,35 @@ export function joint(parent, x = 0, y = 0, z = 0) {
   return g;
 }
 
+const _d = new THREE.Vector3();
+const _n = new THREE.Vector3();
+const _x = new THREE.Vector3();
+const _y = new THREE.Vector3();
+const _z = new THREE.Vector3();
+const _m = new THREE.Matrix4();
+const _e = new THREE.Euler();
+
+/**
+ * Two-bone IK for an arm made of `limb()` segments hanging down from their
+ * joints. `target` (where the end of the lower segment goes) and `pole`
+ * (where the elbow points) are relative to the shoulder, in its parent's
+ * frame. Returns the shoulder's rotation and the elbow's bend about x.
+ */
+export function solveArm(target, pole, upper, lower) {
+  const len = THREE.MathUtils.clamp(target.length(), Math.abs(upper - lower) + 1e-4, upper + lower - 1e-4);
+  const d = _d.copy(target).normalize();
+  const n = _n.copy(pole).addScaledVector(d, -pole.dot(d)).normalize();
+  const cosA = (upper * upper + len * len - lower * lower) / (2 * upper * len);
+  const sinA = Math.sqrt(1 - cosA * cosA);
+  // The upper arm hangs along the shoulder's -y and the elbow folds towards +z.
+  _y.copy(d).multiplyScalar(-cosA).addScaledVector(n, -sinA);
+  _z.copy(d).multiplyScalar(sinA).addScaledVector(n, -cosA);
+  _x.crossVectors(_y, _z);
+  _e.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
+  const cosB = (upper * upper + lower * lower - len * len) / (2 * upper * lower);
+  return { x: _e.x, y: _e.y, z: _e.z, bend: Math.acos(THREE.MathUtils.clamp(cosB, -1, 1)) - Math.PI };
+}
+
 /**
  * Collects pose targets for a frame and eases every joint toward them, so any
  * switch between poses (sit → wave, work → panic) blends instead of popping.
