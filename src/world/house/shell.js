@@ -45,30 +45,23 @@ export function buildShell({ theme, height: H }) {
   group.add(box(x1 - minX, H, T, wall, (minX + x1) / 2, H / 2, z0 + T / 2));
   group.add(box(maxX - minX, 0.1, 0.025, trim, (minX + maxX) / 2, 0.05, minZ + 0.0125, NO_SHADOW));
 
-  // The wall to the garage: garage paint on its side, ours on this one. In
-  // the overview only the part below the dado stands, its cut top in trim.
-  const sides = (garage) => [wall, toon(garage), ends, ends, ends, ends];
+  // The wall to the garage, either side of the door, and over it.
   const wx = minX - T / 2;
   const doorFrom = DOOR.z - DOOR.width / 2;
   const doorTo = DOOR.z + DOOR.width / 2;
   for (const [a, b] of [[minZ, doorFrom], [doorTo, z1]]) {
-    const len = b - a;
-    const zc = (a + b) / 2;
-    group.add(slab(T, DADO, len, sides(theme.wallDark), wx, DADO / 2, zc));
-    walls.add(slab(T, H - DADO, len, sides(theme.wall), wx, (DADO + H) / 2, zc, NO_SHADOW));
-    // Dado rail and skirting on the garage side, like its other walls.
-    group.add(box(0.05, 0.05, len, theme.wallTrim, minX - T - 0.02, DADO, zc, NO_SHADOW));
-    group.add(box(0.06, 0.12, len, theme.wallTrim, minX - T - 0.03, 0.06, zc, NO_SHADOW));
+    garageWall({ group, walls, theme, paint: wall, x: minX, from: a, to: b, height: H });
     const end = Math.min(b, maxZ);
     if (end > a) group.add(box(0.025, 0.1, end - a, trim, minX + 0.0125, 0.05, (a + end) / 2, NO_SHADOW));
   }
-  walls.add(slab(T, H - DOOR.height, DOOR.width, sides(theme.wall), wx, (DOOR.height + H) / 2, DOOR.z, NO_SHADOW));
+  const sides = garageSides(theme, wall, theme.wall);
+  walls.add(slab(T, H - DOOR.height, DOOR.width, sides, wx, (DOOR.height + H) / 2, DOOR.z, NO_SHADOW));
 
   // The doorway: lined and cased in white on our side, in the garage's trim
   // on its side, and the door itself.
   walls.add(box(T, 0.02, DOOR.width, trim, wx, DOOR.height - 0.01, DOOR.z, NO_SHADOW));
   for (const z of [doorFrom + 0.01, doorTo - 0.01]) walls.add(box(T, DOOR.height, 0.02, trim, wx, DOOR.height / 2, z, NO_SHADOW));
-  for (const [x, color] of [[minX + 0.015, trim], [minX - T - 0.015, toon(theme.wallTrim)]]) {
+  for (const [x, color] of [[minX + 0.015, trim], [minX - T - 0.015, ends]]) {
     for (const z of [doorFrom - 0.04, doorTo + 0.04]) walls.add(box(0.03, DOOR.height + 0.08, 0.08, color, x, (DOOR.height + 0.08) / 2, z, NO_SHADOW));
     walls.add(box(0.03, 0.08, DOOR.width + 0.16, color, x, DOOR.height + 0.04, DOOR.z, NO_SHADOW));
   }
@@ -136,6 +129,28 @@ export function buildShell({ theme, height: H }) {
 }
 
 /** The door from the garage, hinged at its front edge, swinging into the living room. */
+/** The faces of a wall to the garage: `paint` on our side (-x faces the garage), its trim on the ends. */
+function garageSides(theme, paint, garage) {
+  const ends = toon(theme.wallTrim);
+  return [paint, toon(garage), ends, ends, ends, ends];
+}
+
+/**
+ * A wall to the garage along z at `x`, from `from` to `to`: garage paint on
+ * its side, with its dado rail and skirting, `paint` on ours. In the overview
+ * only the part below the dado stands, its cut top in trim; the rest goes in
+ * `walls`. Shared by the living room and the spare room.
+ */
+export function garageWall({ group, walls, theme, paint, x, from, to, height: H }) {
+  const len = to - from;
+  const zc = (from + to) / 2;
+  const wx = x - T / 2;
+  group.add(slab(T, DADO, len, garageSides(theme, paint, theme.wallDark), wx, DADO / 2, zc));
+  walls.add(slab(T, H - DADO, len, garageSides(theme, paint, theme.wall), wx, (DADO + H) / 2, zc, NO_SHADOW));
+  group.add(box(0.05, 0.05, len, theme.wallTrim, x - T - 0.02, DADO, zc, NO_SHADOW));
+  group.add(box(0.06, 0.12, len, theme.wallTrim, x - T - 0.03, 0.06, zc, NO_SHADOW));
+}
+
 function doorLeaf() {
   const pivot = new THREE.Group();
   pivot.position.set(LIVING_ROOM.minX - 0.025, 0, DOOR.z + DOOR.width / 2 - 0.01);

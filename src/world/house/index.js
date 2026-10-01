@@ -10,7 +10,7 @@ import {
 } from './decor.js';
 import { DOOR, LIVING_ROOM, T } from './plan.js';
 
-export { DOOR, LIVING_ROOM, SPARE_ROOM } from './plan.js';
+export { LIVING_ROOM } from './plan.js';
 
 // The Smiths' living room from Rick and Morty, through a door in the
 // garage's right wall: the mint couch facing the TV, Rick's

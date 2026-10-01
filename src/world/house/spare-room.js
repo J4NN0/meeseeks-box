@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { PALETTE, box, toon } from '../../engine/toon.js';
-import { COLORS, DADO, SPARE_ROOM, T } from './plan.js';
-import { NO_SHADOW, openWall, slab, windowFrame } from '../walls.js';
+import { COLORS, SPARE_ROOM, T } from './plan.js';
+import { garageWall } from './shell.js';
+import { NO_SHADOW, openWall, windowFrame } from '../walls.js';
 
 // The spare room, through the arch behind the living room couch: empty for
 // now, green walls and bare floorboards. Like the others it's a cut-away:
@@ -27,18 +28,10 @@ export function buildSpareRoom({ theme, height: H }) {
   group.add(box(x1 - minX, 0.18, z1 - minZ, '#5c6158', (minX + x1) / 2 + 0.15, -0.59, (minZ + z1) / 2 + 0.15));
   group.add(box(maxX - minX, 0.012, maxZ - minZ, COLORS.floorboards, (minX + maxX) / 2, 0.006, (minZ + maxZ) / 2, NO_SHADOW));
 
-  // The wall to the garage: garage paint on that side, with its dado rail
-  // and skirting, ours on this one.
-  const ends = toon(theme.wallTrim);
-  const sides = (garage) => [paint, toon(garage), ends, ends, ends, ends];
-  const len = maxZ - minZ;
+  // The wall to the garage, and its skirting on this side.
   const zc = (minZ + maxZ) / 2;
-  const wx = minX - T / 2;
-  group.add(slab(T, DADO, len, sides(theme.wallDark), wx, DADO / 2, zc));
-  walls.add(slab(T, H - DADO, len, sides(theme.wall), wx, (DADO + H) / 2, zc, NO_SHADOW));
-  group.add(box(0.05, 0.05, len, theme.wallTrim, minX - T - 0.02, DADO, zc, NO_SHADOW));
-  group.add(box(0.06, 0.12, len, theme.wallTrim, minX - T - 0.03, 0.06, zc, NO_SHADOW));
-  group.add(box(0.025, 0.1, len, trim, minX + 0.0125, 0.05, zc, NO_SHADOW));
+  garageWall({ group, walls, theme, paint, x: minX, from: minZ, to: maxZ, height: H });
+  group.add(box(0.025, 0.1, maxZ - minZ, trim, minX + 0.0125, 0.05, zc, NO_SHADOW));
 
   // When you walk in: the front wall and the right wall, with windows, ...
   const hole = (at) => ({ at, width: WINDOWS.width, bottom: WINDOWS.bottom, top: WINDOWS.top });
