@@ -140,6 +140,7 @@ export class Multiverse {
     // It stops animating once you leave: settle mid-walk exits and the
     // spawn queue now, or they'd freeze until you come back.
     this.active.manager.sync(this.active.sessions, now, { instant: true });
+    this.active.world.effects.clear();
     this.active.hideLabels();
     this.active.leftAt = now;
     this.active = to;

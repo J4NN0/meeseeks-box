@@ -118,9 +118,15 @@ export class Agent {
         <span class="st"></span>
       </button>
       <div class="doing"></div>`;
-    el.querySelector('.plate').addEventListener('click', (e) => {
+    const plate = el.querySelector('.plate');
+    plate.addEventListener('click', (e) => {
       e.stopPropagation();
       this.onClick?.(this);
+    });
+    plate.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.onClick?.(this, { slap: true });
     });
     this.el = el;
     this.bubbleEl = el.querySelector('.bubble');
@@ -468,6 +474,62 @@ export class Agent {
       root.rotation.y = dampAngle(root.rotation.y, Math.atan2(d.x, d.z), 10, dt);
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------- slaps
+
+  /** The mascot (this agent's, or one of its helpers') that `object` is part of. */
+  characterOf(object) {
+    for (let o = object; o; o = o.parent) {
+      if (o === this.character.root) return this.character;
+      const helper = this.helpers.find((h) => h.root === o);
+      if (helper) return helper.character;
+    }
+    return this.character;
+  }
+
+  /**
+   * Right-clicked: your arm reaches in from the bottom right of the screen
+   * and slaps `who`. Just for fun: the session, the status and the desk don't change.
+   */
+  slap(camera, who = this.character) {
+    if (this.phase === 'gone' || !who.face) return;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).setY(0);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    this.world.effects.slap({
+      camera,
+      face: who.face,
+      radius: who.faceRadius,
+      right,
+      words: who.slapWords,
+      sparks: who.slapSparks,
+      onHit: (push) => this.slapped(who, push, camera.position),
+    });
+  }
+
+  slapped(who, push, eye) {
+    // Gone (or swapped for another mascot) while the hand was on its way.
+    if (this.phase === 'gone' || !who.root.parent) return;
+    const face = who.face.getWorldPosition(new THREE.Vector3());
+    const toward = eye.clone().sub(face).setY(0);
+    if (toward.lengthSq() < 1e-6) toward.copy(push).negate();
+    toward.normalize();
+    // Into the mascot's own frame, where its joints turn.
+    const q = who.root.getWorldQuaternion(new THREE.Quaternion()).invert();
+    who.slap(push.applyQuaternion(q), toward.applyQuaternion(q));
+
+    const now = performance.now();
+    this.slapStreak = now - (this.lastSlapAt ?? -Infinity) < 4000 ? (this.slapStreak || 0) + 1 : 1;
+    this.lastSlapAt = now;
+    const status = this.visualStatus;
+    const situation = who !== this.character ? 'slapHelper'
+      : this.slapStreak >= 3 ? 'slapAgain'
+      : status === 'sleeping' ? 'slapSleep'
+      : status === 'waiting' ? 'slapWait'
+      : 'slap';
+    this.say(line(this.kind, situation), 2.2);
+    this.nextChatter = Math.max(this.nextChatter, 12);
   }
 
   setHighlight(on) {

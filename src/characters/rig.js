@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { mesh } from '../engine/toon.js';
+import { glow, mesh } from '../engine/toon.js';
+import { SLAP, Wobble, starGeometry } from './slap.js';
 
 const { damp } = THREE.MathUtils;
 
@@ -82,6 +83,17 @@ export class Poser {
   }
 }
 
+// Slaps ----------------------------------------------------------------------
+// Right-click a mascot and a cartoon hand smacks it (world/hand.js). The
+// reaction plays on joints the poses never touch (`jolt` above the hips,
+// `headJolt` under the neck), so it lands on top of whatever the mascot is
+// doing: walking, typing, napping, waving.
+
+const _hit = new THREE.Vector3();
+const _r = new THREE.Vector3();
+const _tilt = new THREE.Vector3();
+const _kick = new THREE.Vector3();
+
 /** Shared bookkeeping for every mascot: materials for highlight, blink timers. */
 export class CharacterBase {
   constructor(seed) {
@@ -96,6 +108,120 @@ export class CharacterBase {
     this.blink = 0;
     this.seed = seed;
     this.offset = Math.random() * 100;
+
+    // Each mascot sets these up for slaps: the joints that take the hit, the
+    // head the hand aims at (`face`, `faceRadius`), where the dizzy stars
+    // circle (`crown`, `crownRadius`), cheeks for the handprint (`marks`,
+    // -x then +x), and how hard each part gets thrown.
+    this.jolt = null;
+    this.headJolt = null;
+    this.face = null;
+    this.faceRadius = 0.25;
+    this.crown = null;
+    this.crownRadius = 0.2;
+    this.marks = [];
+    this.slapFeel = { head: 0.5, body: 0.1, squash: 0.08, spin: false };
+    this.slapWords = ['SLAP!', 'SLAP!', 'SMACK!', 'WHAP!'];
+    this.slapSparks = 4;
+    this.slapT = Infinity;
+    this.headWobble = new Wobble(16, 0.3);
+    this.bodyWobble = new Wobble(10, 0.35);
+    this.squash = new Wobble(18, 0.35);
+    this.spin = 0;
+    this.spinTarget = 0;
+  }
+
+  /** Seconds since the last slap landed, while it's still showing. */
+  get flinching() { return this.slapT < SLAP.flinch; }
+  get dazed() { return this.slapT >= SLAP.flinch && this.slapT < SLAP.daze; }
+
+  /**
+   * The hand just landed. `push` is where it shoves the head and `toward`
+   * points at the viewer, both flat and in the root's frame.
+   */
+  slap(push, toward) {
+    this.slapT = 0;
+    const { head, body, squash, spin } = this.slapFeel;
+    // The hand lands above the neck and in front of it, so the head rolls
+    // with the push and turns away from it (or towards it, hit from behind).
+    const torque = _r.set(0, 1, 0).addScaledVector(toward, 0.8).cross(push).normalize();
+    if (this.headJolt) this.headWobble.kick(_kick.copy(torque).multiplyScalar(head));
+    // The body leans with the push and twists a little; with no head to
+    // turn (Clawd), it takes the whole twist.
+    _tilt.set(push.z, 0, -push.x).normalize().multiplyScalar(body);
+    _tilt.y = torque.y * body * (this.headJolt ? 0.6 : 1.6);
+    this.bodyWobble.kick(_tilt);
+    this.squash.kick(_kick.set(0, squash, 0));
+    // A robot head just spins right round.
+    if (spin) this.spinTarget += Math.PI * 2 * (torque.y < 0 ? -1 : 1);
+    // A handprint on the cheek on the side it landed, unless it hit the back
+    // of the head.
+    const hit = _hit.copy(push).negate();
+    const cheek = Math.abs(hit.x) > 0.3 && hit.z > -0.55 ? this.marks[hit.x < 0 ? 0 : 1] : null;
+    for (const m of this.marks) m.visible = m === cheek;
+  }
+
+  /** Call first thing in `update`: runs the springs and the slap's props. */
+  updateSlap(dt) {
+    if (this.slapT === Infinity) return;
+    this.slapT += dt;
+    const t = this.slapT;
+    this.headWobble.step(dt);
+    this.bodyWobble.step(dt);
+    this.squash.step(dt);
+    this.spin = damp(this.spin, this.spinTarget, 5, dt);
+    if (Math.abs(this.spinTarget - this.spin) < 0.01) this.spin = this.spinTarget = 0;
+
+    const h = this.headWobble.x;
+    this.headJolt?.rotation.set(h.x, h.y + this.spin, h.z);
+    const b = this.bodyWobble.x;
+    const s = this.squash.x.y;
+    if (this.jolt) {
+      this.jolt.rotation.set(b.x, b.y, b.z);
+      this.jolt.scale.set(1 + s / 2, 1 - s, 1 + s / 2);
+    }
+
+    for (const m of this.marks) {
+      if (m.visible) m.material.opacity = 0.85 * THREE.MathUtils.clamp((SLAP.mark - t) / 1.5, 0, 1);
+    }
+    this.updateStars(t, dt);
+
+    if (t > SLAP.mark && this.headWobble.resting && this.bodyWobble.resting && this.squash.resting && !this.spinTarget) {
+      this.slapT = Infinity;
+      this.headJolt?.rotation.set(0, 0, 0);
+      this.jolt?.rotation.set(0, 0, 0);
+      this.jolt?.scale.set(1, 1, 1);
+      for (const m of this.marks) m.visible = false;
+    }
+  }
+
+  /** Three little stars circling the head while it's seeing them. */
+  updateStars(t, dt) {
+    const on = t > 0.12 && t < SLAP.daze;
+    if (!on) {
+      if (this.stars) this.stars.visible = false;
+      return;
+    }
+    if (!this.stars) {
+      this.stars = new THREE.Group();
+      this.stars.rotation.x = 0.22;
+      for (let i = 0; i < 3; i++) {
+        const star = mesh(starGeometry, glow('#ffe14d'), { cast: false, receive: false });
+        if (this.agentId) star.userData.agentId = this.agentId;
+        this.stars.add(star);
+      }
+      this.crown.add(this.stars);
+    }
+    const r = this.crownRadius;
+    const grow = Math.min(1, (t - 0.12) / 0.2) * Math.min(1, (SLAP.daze - t) / 0.4);
+    this.stars.visible = true;
+    this.stars.rotation.y += dt * 5;
+    this.stars.children.forEach((star, i) => {
+      const a = (i / 3) * Math.PI * 2;
+      star.position.set(Math.cos(a) * r, Math.sin(t * 9 + i * 2.1) * r * 0.12, Math.sin(a) * r);
+      star.rotation.set(0, Math.atan2(Math.cos(a), Math.sin(a)), t * 7 + i);
+      star.scale.setScalar(r * 0.36 * grow + 1e-4);
+    });
   }
 
   setMode(mode) { this.mode = mode; }
@@ -124,11 +250,12 @@ export class CharacterBase {
 
   /** Marks every mesh so a raycast hit can be traced back to its agent. */
   tag(agentId) {
+    this.agentId = agentId;
     this.root.traverse((o) => { if (o.isMesh) o.userData.agentId = agentId; });
   }
 
   dispose() {
-    this.root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+    this.root.traverse((o) => { if (o.isMesh && !o.geometry.userData.shared) o.geometry.dispose(); });
     for (const m of this.materials) m.dispose();
     this.root.removeFromParent();
   }

@@ -3,8 +3,9 @@ import { isShared } from './toon.js';
 /**
  * Frees what a scene holds on the GPU: geometries, its own materials and
  * their textures, shadow maps, and the DOM of its floating labels. Shared
- * materials (toon(), glow()), geometries marked `userData.shared` and the
- * textures in `keep` stay, because other scenes still use them.
+ * materials (toon(), glow()), geometries and textures marked
+ * `userData.shared` and the textures in `keep` stay, because other scenes
+ * still use them.
  */
 export function disposeScene(scene, { keep = new Set() } = {}) {
   const geometries = new Set();
@@ -17,7 +18,7 @@ export function disposeScene(scene, { keep = new Set() } = {}) {
   });
   for (const g of geometries) g.dispose();
   for (const m of materials) {
-    if (m.map && !keep.has(m.map)) m.map.dispose();
+    if (m.map && !keep.has(m.map) && !m.map.userData.shared) m.map.dispose();
     m.dispose();
   }
   scene.clear();

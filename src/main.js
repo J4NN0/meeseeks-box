@@ -85,7 +85,8 @@ const multiverse = new Multiverse({
     if (type === 'spawn' && performance.now() - bootAt < 8000) return;
     hud.announce(type, agent);
   },
-  onClick: (agent) => focusAgent(agent),
+  // A name tag: click to inspect, right-click to slap.
+  onClick: (agent, { slap: smack } = {}) => (smack ? slap({ agent }) : focusAgent(agent)),
   onEnterGate: (level) => enterGate(level),
   onCollapse: () => collapse(),
 });
@@ -158,6 +159,12 @@ function updateFlight(dt) {
     flight = null;
     f.onDone?.();
   }
+}
+
+/** Right-click: a hand swings in and slaps the mascot (or helper) you're on. */
+function slap(target) {
+  if (traveling || !target?.agent) return;
+  target.agent.slap(camera, target.who);
 }
 
 function focusAgent(agent) {
@@ -517,8 +524,9 @@ let aimFrame = 0;
 let downAt = null;
 
 /**
- * What's under a screen point: { agent } for a mascot, its helpers or its
- * desk; { board, action } for a wall board (action is null between items).
+ * What's under a screen point: { agent, who } for a mascot or its helpers
+ * (`who` being the one hit), { agent } for its desk; { board, action } for a
+ * wall board (action is null between items).
  */
 function pick(ndc, maxDistance = Infinity) {
   raycaster.setFromCamera(ndc, camera);
@@ -531,7 +539,7 @@ function pick(ndc, maxDistance = Infinity) {
     const d = hit.object.userData;
     if (d.agentId) {
       const agent = manager.byId(d.agentId);
-      return agent ? { agent } : null;
+      return agent ? { agent, who: agent.characterOf(hit.object) } : null;
     }
     if (d.deskIndex !== undefined) {
       const agent = world.desks[d.deskIndex].agent;
@@ -572,6 +580,9 @@ function setPointed(target) {
   here().world.battery.setHover(!!target?.gate);
 }
 
+/** A right-click, or a Control-click on a Mac. */
+const secondary = (e) => e.button === 2 || (e.button === 0 && e.ctrlKey);
+
 function toNdc(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   return pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
@@ -591,6 +602,8 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   });
   pendingMove = e;
 });
+// Right-click slaps, so no browser menu over the office.
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('pointerleave', () => {
   if (view === 'orbit') setPointed(null);
 });
@@ -598,15 +611,20 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   downAt = { x: e.clientX, y: e.clientY };
   if (view === 'walk') {
     if (!walker.locked) { if (!flight) walker.lock(); }
+    else if (secondary(e)) slap(aimed);
+    else if (e.button !== 0) return;
     else if (aimed?.agent) focusAgent(aimed.agent);
     else if (aimed?.action) act(aimed.action);
   }
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (view !== 'orbit') return;
+  // A drag orbits (or pans, with the right button) rather than clicks.
   if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
+  if (e.button !== 0 && e.button !== 2) return;
   const target = pick(toNdc(e));
-  if (target?.agent) focusAgent(target.agent);
+  if (secondary(e)) slap(target);
+  else if (target?.agent) focusAgent(target.agent);
   else if (target?.board && target.board !== focusedBoard) focusBoard(target.board);
   else if (target?.action) act(target.action);
 });

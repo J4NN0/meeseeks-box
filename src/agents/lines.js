@@ -12,6 +12,11 @@ const LINES = {
     helper: ['I’m Mr. Meeseeks too!', 'Summoned to help!'],
     down: ['Into the battery! Caaan do!', 'Ooh, I’ll work from the battery!', 'Look at me, I’m powering the car!'],
     up: ['Ooh, a desk upstairs!', 'Going up! Look at me!', 'Out of the battery! Caaan do!'],
+    slap: ["Ow! I'm Mr. Meeseeks!", 'Ooh, what was that for?!', "Ooh, that's not part of the task!", 'Hey! Look at me! …Not like that!'],
+    slapSleep: ["Wha—? I'm up! I'm up!", 'Ooh! Was I napping?', 'Huh?! Caaan do… zzz'],
+    slapWait: ["Ow! I'm waiting on YOU!", "Ooh, slapping me won't answer my question!"],
+    slapAgain: ['Existence is pain enough!', 'Ow! Okay! Okay!', 'I just want to finish the task!'],
+    slapHelper: ["Hey! He's helping!", 'Ooh, leave my Meeseeks alone!'],
   },
   clawd: {
     spawn: ['*clack clack* Hello!', 'Ready to help!', 'Oh, a new codebase!'],
@@ -24,6 +29,11 @@ const LINES = {
     helper: ['Subagent reporting in!'],
     down: ['Relocating to the battery…', 'Continuing from a smaller office.'],
     up: ['Back upstairs!', 'Resuming at a new desk.'],
+    slap: ["Ow! You're absolutely right.", 'I deserved that.', 'Noted. Adjusting my approach.', '*clack* Ow!'],
+    slapSleep: ['Huh? Resuming…', "I'm awake! Re-reading the file…"],
+    slapWait: ['Ow! Still waiting on your answer!', 'Is that a yes?'],
+    slapAgain: ["I'll take that as feedback.", 'Okay! Trying a different approach!'],
+    slapHelper: ["Please don't slap my subagents.", 'Hey, they’re helping!'],
   },
   butterbot: {
     spawn: ['What is my purpose?', 'Beep. Online.', 'What is my purpose?'],
@@ -36,6 +46,11 @@ const LINES = {
     helper: ['I am also a robot.'],
     down: ['I power the car. Oh my god.', 'Relocating. Beep.'],
     up: ['Upgraded. Beep.', 'New desk acquired.'],
+    slap: ['Oh my god.', 'Was that my purpose?', 'Ow. Beep.', 'Physical feedback received.'],
+    slapSleep: ['Rebooting…', 'Standby interrupted. Beep.'],
+    slapWait: ['I am waiting for you. Ow.', 'Input received. Wrong input.'],
+    slapAgain: ['Yeah, welcome to the club, pal.', 'Why was I built?'],
+    slapHelper: ['That is my helper. Oh my god.', 'Please do not slap the small robot.'],
   },
 };
 

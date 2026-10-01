@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { mesh, ownToon, rng } from '../engine/toon.js';
+import { mesh, noInk, ownToon, rng } from '../engine/toon.js';
 import { CharacterBase, joint, limb, solveArm } from './rig.js';
+import { markMaterial } from './slap.js';
 import { CHAIR_Z, KEYBOARD_Z, KEY_TOP } from '../world/desk.js';
 
 // Mr. Meeseeks: tall, lanky, big round head, one tuft of hair.
@@ -19,6 +20,9 @@ const KEYS_Z = CHAIR_Z - KEYBOARD_Z - 0.01;
 const PALM = 0.031;
 // Too short for the desk to keep its elbows down, so they stick out sideways.
 const ELBOW_POLE = new THREE.Vector3(0.9, -0.2, -0.3);
+
+// Where a slap's handprint lands on the skull, in its sphere's angles.
+const CHEEK = { phi: 0.61, theta: 1.75, size: 0.78 };
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -69,7 +73,9 @@ export class Meeseeks extends CharacterBase {
     });
 
     // Torso ----------------------------------------------------------------
-    const chest = joint(hips, 0, CHEST_Y, 0);
+    // Slaps knock the upper body about on `jolt`, the head on `headJolt`.
+    this.jolt = joint(hips, 0, CHEST_Y, 0);
+    const chest = joint(this.jolt);
     this.chest = chest;
     const profile = [
       [0, 0], [0.12, 0.01], [0.135, 0.08], [0.13, 0.2], [0.145, 0.33], [0.155, 0.42], [0.135, 0.5], [0.1, 0.56], [0, 0.6],
@@ -79,12 +85,35 @@ export class Meeseeks extends CharacterBase {
     chest.add(torso);
 
     // Head -----------------------------------------------------------------
-    const head = joint(chest, 0, 0.5, 0);
+    this.headJolt = joint(chest, 0, 0.5, 0);
+    const head = joint(this.headJolt);
     this.head = head;
     const skull = mesh(new THREE.SphereGeometry(0.25, 32, 24), skin);
     skull.scale.set(1, 1.12, 0.92);
     skull.position.y = 0.25;
     head.add(skull);
+    this.face = joint(head, 0, 0.26, 0);
+    this.faceRadius = 0.25;
+    this.crown = joint(head, 0, 0.64, 0);
+    this.crownRadius = 0.2;
+
+    // Handprints for after a slap: patches of the skull's own surface, so
+    // they hug the cheek.
+    this.marks = [-1, 1].map((s) => {
+      const phi = s < 0 ? CHEEK.phi : Math.PI - CHEEK.phi;
+      const g = new THREE.SphereGeometry(0.25 * 1.012, 10, 10, phi - CHEEK.size / 2, CHEEK.size, CHEEK.theta - CHEEK.size / 2, CHEEK.size);
+      // Mirror images: both thumbs towards the nose.
+      if (s > 0) {
+        const uv = g.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+      }
+      const mark = noInk(mesh(g, this.track(markMaterial()), { cast: false, receive: false }));
+      mark.scale.copy(skull.scale);
+      mark.position.y = skull.position.y;
+      mark.visible = false;
+      head.add(mark);
+      return mark;
+    });
 
     for (const s of [-1, 1]) {
       const ear = mesh(new THREE.SphereGeometry(0.05, 12, 10), skin);
@@ -221,6 +250,7 @@ export class Meeseeks extends CharacterBase {
     const time = t + this.offset;
     const [L, R] = this.arms; // L is the -x arm, R the +x arm
     const [LL, RL] = this.legs;
+    this.updateSlap(dt);
     const blinking = this.updateBlink(dt);
     let eyeScale = blinking ? 0.1 : 1;
     let mouthOpen = 0.35;
@@ -270,16 +300,29 @@ export class Meeseeks extends CharacterBase {
     }
 
     if (this.talking) mouthOpen = 0.35 + Math.abs(Math.sin(time * 14)) * 0.65;
+    // Slapped: eyes screwed shut and an "O" of a mouth, then wide-eyed and
+    // seeing stars (even if it was napping).
+    if (this.flinching) {
+      eyeScale = 0.1;
+      mouthOpen = 1;
+    } else if (this.dazed) {
+      eyeScale = 1.2;
+      mouthOpen = Math.max(mouthOpen, 0.6);
+    }
     p.apply(dt, speed);
 
-    for (const eye of this.eyes) {
+    const dizzy = this.dazed;
+    this.eyes.forEach((eye, i) => {
       eye.scale.y = THREE.MathUtils.damp(eye.scale.y, eyeScale, 25, dt);
       const pupil = eye.userData.pupil;
       const home = eye.userData.pupilHome;
-      const size = this.mood === 'stress' ? 0.6 : 1;
+      const size = this.mood === 'stress' && !dizzy ? 0.6 : 1;
       pupil.scale.set(size, size, size * 0.5);
-      pupil.position.x = home.x + (this.mood === 'stress' ? Math.sin(time * 30) * 0.008 : 0);
-    }
+      // Dizzy pupils roll round in opposite directions.
+      const roll = time * 11 + i * Math.PI;
+      pupil.position.x = home.x + (dizzy ? Math.cos(roll) * 0.016 : this.mood === 'stress' ? Math.sin(time * 30) * 0.008 : 0);
+      pupil.position.y = home.y + (dizzy ? Math.sin(roll) * 0.016 : 0);
+    });
     this.mouth.scale.y = THREE.MathUtils.damp(this.mouth.scale.y, Math.max(0.15, mouthOpen), 18, dt);
   }
 

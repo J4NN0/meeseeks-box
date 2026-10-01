@@ -25,6 +25,9 @@ export class ButterBot extends CharacterBase {
     this.seatedHeadHeight = SEAT_H + BOOSTER_H + 0.75;
 
     this.hips = joint(this.root, 0, 0, 0);
+    this.slapFeel = { head: 0.35, body: 0.14, squash: 0.1, spin: true };
+    this.slapWords = ['CLANG!', 'BONK!', 'CLANG!'];
+    this.slapSparks = 12;
 
     // Tank treads.
     this.treads = [-1, 1].map((s) => {
@@ -39,7 +42,9 @@ export class ButterBot extends CharacterBase {
       return tread;
     });
 
-    this.body = joint(this.hips, 0, 0.11, 0);
+    // Slaps rock the body on `jolt` and send the head spinning on `headJolt`.
+    this.jolt = joint(this.hips, 0, 0.11, 0);
+    this.body = joint(this.jolt);
     const base = mesh(new THREE.BoxGeometry(0.26, 0.05, 0.3), steelDark);
     base.position.y = 0.02;
     this.body.add(base);
@@ -59,7 +64,12 @@ export class ButterBot extends CharacterBase {
     const neck = mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.08, 10), steelDark);
     neck.position.y = 0.04;
     this.neck.add(neck);
-    this.head = joint(this.neck, 0, 0.08, 0);
+    this.headJolt = joint(this.neck, 0, 0.08, 0);
+    this.head = joint(this.headJolt);
+    this.face = joint(this.head, 0, 0.07, 0);
+    this.faceRadius = 0.12;
+    this.crown = joint(this.head, 0, 0.29, 0);
+    this.crownRadius = 0.14;
     const dome = mesh(new THREE.SphereGeometry(0.1, 20, 14), steel);
     dome.scale.set(1.2, 0.85, 1);
     dome.position.y = 0.07;
@@ -107,6 +117,7 @@ export class ButterBot extends CharacterBase {
   update(dt, t) {
     const p = this.poser;
     const time = t + this.offset;
+    this.updateSlap(dt);
     const [L, R] = this.arms;
     let eye = this.eyeOn;
     let hipY = 0;
@@ -148,9 +159,20 @@ export class ButterBot extends CharacterBase {
       p.rot(L.shoulder, 0, 0, -0.2).rot(L.elbow, -0.4, 0, 0).rot(R.shoulder, 0, 0, 0.2).rot(R.elbow, -0.4, 0, 0);
     }
 
+    // Slapped: the eye flashes red, then glitches while the head spins back.
+    let snap = false;
+    if (this.flinching) {
+      eye = this.eyeAngry;
+      snap = true;
+    } else if (this.dazed) {
+      eye = Math.sin(time * 23) + Math.sin(time * 37) > 0.9 ? this.eyeOff : this.eyeOn;
+      snap = true;
+    }
+
     p.pos(this.hips, hipX, hipY, 0);
     p.apply(dt, 12);
     this.booster.position.y = SEAT_H + BOOSTER_H;
-    this.eyeMat.color.lerp(eye, 1 - Math.exp(-20 * dt));
+    if (snap) this.eyeMat.color.copy(eye);
+    else this.eyeMat.color.lerp(eye, 1 - Math.exp(-20 * dt));
   }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { mesh, ownToon } from '../engine/toon.js';
+import { mesh, noInk, ownToon } from '../engine/toon.js';
 import { CharacterBase, joint } from './rig.js';
+import { markMaterial } from './slap.js';
 
 // Clawd, the blocky little critter from Claude Code's welcome screen:
 //    ▐▛███▜▌
@@ -24,7 +25,9 @@ export class Clawd extends CharacterBase {
     this.seatedHeadHeight = SEAT_H + BOOSTER_H + 0.75;
 
     this.hips = joint(this.root, 0, LEG_H, 0);
-    this.body = joint(this.hips, 0, 0, 0);
+    // All head, so a slap throws the whole body (on `jolt`).
+    this.jolt = joint(this.hips);
+    this.body = joint(this.jolt);
     const torso = mesh(new THREE.BoxGeometry(0.64, 0.44, 0.4), body);
     torso.position.y = 0.26;
     this.body.add(torso);
@@ -37,6 +40,36 @@ export class Clawd extends CharacterBase {
       eye.position.set(s * 0.13, 0.36, 0.205);
       this.body.add(eye);
       return eye;
+    });
+    // Squeezed shut after a slap: > <
+    const bar = new THREE.BoxGeometry(0.085, 0.026, 0.02);
+    this.squint = [-1, 1].map((s) => {
+      const g = new THREE.Group();
+      g.position.set(s * 0.13 - s * 0.028, 0.36, 0.205);
+      for (const up of [-1, 1]) {
+        const m = mesh(bar, black);
+        m.position.set(s * 0.028, up * 0.022, 0);
+        m.rotation.z = up * s * 0.64;
+        g.add(m);
+      }
+      g.visible = false;
+      this.body.add(g);
+      return g;
+    });
+
+    this.face = joint(this.body, 0, 0.3, 0);
+    this.faceRadius = 0.32;
+    this.crown = joint(this.body, 0, 0.68, 0);
+    this.crownRadius = 0.26;
+    this.slapFeel = { head: 0, body: 0.3, squash: 0.14, spin: false };
+    this.marks = [-1, 1].map((s) => {
+      const mark = noInk(mesh(new THREE.PlaneGeometry(0.19, 0.19), this.track(markMaterial()), { cast: false, receive: false }));
+      mark.position.set(s * 0.215, 0.2, 0.2015);
+      // Mirror images: both thumbs towards the middle.
+      if (s > 0) mark.scale.x = -1;
+      mark.visible = false;
+      this.body.add(mark);
+      return mark;
     });
 
     this.arms = [-1, 1].map((s) => {
@@ -72,6 +105,7 @@ export class Clawd extends CharacterBase {
   update(dt, t) {
     const p = this.poser;
     const time = t + this.offset;
+    this.updateSlap(dt);
     const blinking = this.updateBlink(dt);
     const [L, R] = this.arms;
     let eyeY = blinking ? 0.15 : 1;
@@ -130,6 +164,17 @@ export class Clawd extends CharacterBase {
     p.apply(dt, this.mode === 'walk' ? 18 : 12);
     this.body.scale.y = THREE.MathUtils.damp(this.body.scale.y, squash, 12, dt);
     this.booster.position.y = SEAT_H + BOOSTER_H;
-    for (const e of this.eyes) e.scale.y = THREE.MathUtils.damp(e.scale.y, eyeY, 25, dt);
+    // Slapped: > < for a moment, then wide eyes wobbling about.
+    const flinch = this.flinching;
+    const dizzy = this.dazed;
+    if (dizzy) eyeY = 1.2;
+    this.eyes.forEach((e, i) => {
+      e.visible = !flinch;
+      e.scale.y = THREE.MathUtils.damp(e.scale.y, eyeY, 25, dt);
+      const roll = time * 11 + i * Math.PI;
+      e.position.x = (i ? 0.13 : -0.13) + (dizzy ? Math.cos(roll) * 0.014 : 0);
+      e.position.y = 0.36 + (dizzy ? Math.sin(roll) * 0.014 : 0);
+    });
+    for (const g of this.squint) g.visible = flinch;
   }
 }
