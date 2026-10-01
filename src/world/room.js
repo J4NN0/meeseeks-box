@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { PALETTE, box, cyl, glow, mesh, noInk, rng, sphere, toon } from '../engine/toon.js';
+import { PALETTE, box, cyl, glow, mesh, noInk, ownToon, rng, sphere, toon } from '../engine/toon.js';
 import { createPortal } from './portal.js';
 import { CAR, HULL, HULL_Y, carColliders, hullGeometry } from './car.js';
-import { glowTexture, labelTexture, neonSignTexture } from './screens.js';
+import { canvasTexture, glowTexture, labelTexture, neonSignTexture } from './screens.js';
+import { addCollection } from './props/index.js';
 
 // Rick's garage, now a seed-stage startup. A cut-away diorama: floor, back
 // wall and left wall; the open sides face the camera. The universes in the
@@ -104,16 +105,18 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   solidCircle(-7.35, -5.5, 0.32);
   room.add(stringLights());
 
-  // Left wall: workbench, portal, shelves, fridge ------------------------
-  room.add(workbench(-7.45, -3.9));
+  // Left wall: workbench, portal, Andúril, shelves, fridge ----------------
+  const bench = workbench(-7.45, -3.9);
+  room.add(bench);
   solidBox(-7.45, -3.9, 1.05, 2.85);
+  // Andúril on the wall, and the rest of the collection on the workbench.
+  updaters.push(...addCollection(room, { group: bench, ...BENCH }));
   const portal = createPortal(PORTAL.radius);
   portal.group.position.set(PORTAL.x, PORTAL.y, PORTAL.z);
   portal.group.rotation.y = Math.PI / 2;
   room.add(portal.group);
   updaters.push((dt, t) => portal.update(t));
 
-  room.add(poster(-7.96, 2.05, -1.75, 'MOVE FAST', 'BREAK DIMENSIONS', '#ff5fa2'));
   room.add(poster(1.45, 2.35, -5.96, 'WUBBA LUBBA', 'DUB DUB SHIP IT', '#97ce4c', 0));
   room.add(shelves(-7.72, 3.3));
   room.add(fridge(-7.45, 5.25));
@@ -291,56 +294,35 @@ function spaceCruiser(x, z, rot) {
   return g;
 }
 
+// The workbench's two surfaces and the face of its pegboard, for what's kept
+// on them (props/index.js).
+const BENCH = { top: 0.96, shelf: 0.305, board: -0.48 };
+
 function workbench(x, z) {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
   const L = 2.8;
-  g.add(box(1.0, 0.08, L, PALETTE.wood, 0, 0.92, 0));
-  g.add(box(0.9, 0.05, L - 0.2, PALETTE.woodDark, 0, 0.28, 0));
+  g.add(box(1.0, 0.08, L, PALETTE.wood, 0, BENCH.top - 0.04, 0));
+  g.add(box(0.9, 0.05, L - 0.2, PALETTE.woodDark, 0, BENCH.shelf - 0.025, 0));
   for (const sx of [-0.42, 0.42]) for (const sz of [-L / 2 + 0.1, L / 2 - 0.1]) g.add(box(0.07, 0.9, 0.07, PALETTE.woodDark, sx, 0.45, sz));
-
-  // Pegboard with tools.
-  g.add(box(0.04, 1.3, L - 0.1, '#c9a26d', -0.5, 1.95, 0));
-  const tools = [
-    () => { const t = new THREE.Group(); t.add(box(0.03, 0.4, 0.05, '#888f99', 0, 0, 0)); t.add(box(0.03, 0.08, 0.12, '#888f99', 0, 0.2, 0)); return t; },
-    () => { const t = new THREE.Group(); t.add(box(0.03, 0.35, 0.04, '#8a5a34', 0, 0, 0)); t.add(box(0.05, 0.08, 0.18, '#555c66', 0, 0.2, 0)); return t; },
-    () => { const t = new THREE.Group(); t.add(mesh(new THREE.TorusGeometry(0.13, 0.025, 8, 20), toon('#d35400'))); t.rotation.y = Math.PI / 2; return t; },
-    () => { const t = new THREE.Group(); t.add(box(0.02, 0.3, 0.2, '#c0c6ce', 0, 0, 0)); t.add(box(0.03, 0.1, 0.07, '#e17055', 0, 0.18, -0.07)); return t; },
-  ];
-  for (let i = 0; i < 7; i++) {
-    const t = tools[i % tools.length]();
-    t.position.set(-0.45, 2.0 + (i % 2) * 0.25, -L / 2 + 0.3 + i * 0.36);
-    g.add(t);
-  }
-
-  // Vise, jars of mysterious fluids, the portal gun, a plumbus.
-  g.add(box(0.2, 0.12, 0.16, '#3d6f9e', 0.1, 1.02, 1.1));
-  g.add(box(0.08, 0.1, 0.24, '#3d6f9e', 0.1, 1.12, 1.1));
-  const jars = [['#97ce4c', -0.8], ['#6ec6ee', -0.62], ['#ff5fa2', -0.45], ['#97ce4c', 0.55]];
-  for (const [c, jz] of jars) {
-    g.add(cyl(0.07, 0.07, 0.2, toon('#e8f4f0'), 14).translateX(-0.25).translateY(1.06).translateZ(jz));
-    g.add(cyl(0.06, 0.06, 0.13, glow(c), 14).translateX(-0.25).translateY(1.03).translateZ(jz));
-    g.add(cyl(0.075, 0.075, 0.03, '#8b939c', 14).translateX(-0.25).translateY(1.17).translateZ(jz));
-  }
-  const gun = new THREE.Group();
-  gun.position.set(0.15, 1.02, -0.05);
-  gun.rotation.y = 0.5;
-  gun.add(box(0.12, 0.1, 0.3, '#e8ecef', 0, 0.02, 0));
-  gun.add(cyl(0.035, 0.035, 0.16, glow('#a6ff5a'), 12).rotateX(Math.PI / 2).translateY(0.2).translateZ(-0.06));
-  gun.add(box(0.06, 0.14, 0.07, '#e8ecef', 0, -0.06, 0.1));
-  gun.add(sphere(0.045, glow('#c8ff7a'), 12).translateY(0.08).translateZ(-0.05));
-  g.add(gun);
-  const plumbus = new THREE.Group();
-  plumbus.position.set(0.2, 1.0, 0.55);
-  const pb = sphere(0.09, '#f08bb3', 14);
-  pb.scale.set(1, 0.8, 1.3);
-  plumbus.add(pb);
-  plumbus.add(cyl(0.035, 0.05, 0.2, '#f6a6c7', 10).translateY(0.12));
-  plumbus.add(sphere(0.05, '#e46f9c', 10).translateY(0.24));
-  g.add(plumbus);
-  g.add(box(0.36, 0.2, 0.22, PALETTE.red, 0.2, 0.41, -0.8));
-  g.add(box(0.1, 0.04, 0.04, '#333', 0.2, 0.53, -0.8));
+  // Pegboard, for whatever ends up hanging there.
+  g.add(box(0.04, 1.3, L - 0.1, ownToon('#c9a26d', { map: pegboardTexture(L - 0.1, 1.3) }), BENCH.board - 0.02, 1.95, 0));
   return g;
+}
+
+/** A hole every 5cm, on a `w` by `h` board. */
+function pegboardTexture(w, h) {
+  const { ctx, texture } = canvasTexture(32, 32);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = '#5b3f22';
+  ctx.beginPath();
+  ctx.arc(16, 16, 5, 0, Math.PI * 2);
+  ctx.fill();
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(Math.round(w / 0.05), Math.round(h / 0.05));
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function coffeeBar(x, z) {
