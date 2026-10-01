@@ -93,8 +93,9 @@ export class World {
     return [new THREE.Vector3(SIDE_AISLE_X, 0, from.z), this.battery.mouth.clone()];
   }
 
-  update(dt, t, now) {
-    this.room.update(dt, t);
+  /** `camera` is where you're looking from (the living room's door opens for you). */
+  update(dt, t, now, camera) {
+    this.room.update(dt, t, camera);
     this.box.update(dt, t);
     this.battery.update(dt, t);
     this.effects.update(dt);

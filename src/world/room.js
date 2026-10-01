@@ -4,16 +4,22 @@ import { createPortal } from './portal.js';
 import { CAR, HULL, HULL_Y, carColliders, hullGeometry } from './car.js';
 import { canvasTexture, glowTexture, labelTexture, neonSignTexture } from './screens.js';
 import { addCollection } from './props/index.js';
+import { LIVING_ROOM, buildLivingRoom } from './house/index.js';
+import { NO_SHADOW, openWall } from './walls.js';
 
 // Rick's garage, now a seed-stage startup. A cut-away diorama: floor, back
-// wall and left wall; the open sides face the camera. The universes in the
+// wall and left wall; the open sides face the camera. Through a door in its
+// right wall, the Smiths' living room and a spare room (house/). The universes in the
 // car battery reuse it with their own `theme` (verses.js); the wall boards
 // are shared, so every copy shows the same TV and whiteboard.
 
 export const ROOM = { minX: -8, maxX: 8, minZ: -6, maxZ: 6, height: 3.6 };
+/** The garage and the living room next door: what the overview looks at. */
+export const SITE = { ...ROOM, maxX: LIVING_ROOM.maxX };
 
-// Walkable floor for first-person mode: inside the four walls.
-export const WALK_BOUNDS = { minX: -7.95, maxX: 7.95, minZ: -5.95, maxZ: 5.95 };
+// Walkable floor for first-person mode: inside the outer walls. The walls
+// between the rooms are colliders.
+export const WALK_BOUNDS = { minX: -7.95, maxX: LIVING_ROOM.maxX - 0.05, minZ: -5.95, maxZ: 5.95 };
 export const PORTAL = { x: -7.93, y: 1.55, z: 0.25, radius: 1.05 };
 
 export function buildRoom(scene, { theme, dashboard, whiteboard }) {
@@ -137,19 +143,29 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   solidBox(6.3, 2.7, 1.72, 2.8);
   for (const [x, z] of [[-5.8, 3.7], [-4.5, 4.8], [-5.9, 5.1]]) solidCircle(x, z, 0.5);
 
+  // Next door, between the car and the ping-pong table: the living room,
+  // and the spare room through it, along the rest of the right wall.
+  const living = buildLivingRoom({ theme, height: ROOM.height });
+  room.add(living.group);
+  colliders.push(...living.colliders);
+
   // The diorama is open on two sides for the overview. When you walk in, the
   // missing walls and a ceiling close it up; the windows look out into space.
   const enclosure = buildEnclosure(theme);
+  enclosure.add(living.walls);
   enclosure.visible = false;
   room.add(enclosure);
 
   // Lights ------------------------------------------------------------------
   scene.add(new THREE.HemisphereLight(theme.sky, '#7b806f', 1.7));
   const sun = new THREE.DirectionalLight('#fff1d6', 2.1);
-  sun.position.set(7, 13, 9);
+  // Aimed between the two rooms, so its shadows reach both.
+  sun.position.set(10, 13, 8.5);
+  sun.target.position.set(3, 0, -0.5);
+  scene.add(sun.target);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -11, right: 11, top: 11, bottom: -11, near: 1, far: 40 });
+  Object.assign(sun.shadow.camera, { left: -13, right: 13, top: 11, bottom: -11, near: 1, far: 40 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   scene.add(sun);
@@ -161,11 +177,14 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
     whiteboard,
     tvScreen,
     wbFace,
+    living,
     setEnclosed(on) {
       enclosure.visible = on;
     },
-    update(dt, t) {
+    /** `camera` is where you are: walking in, the living room's door opens for you. */
+    update(dt, t, camera) {
       for (const u of updaters) u(dt, t);
+      living.update(dt, t, enclosure.visible && camera ? camera.position : null);
     },
   };
 }
@@ -175,54 +194,38 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
 function buildEnclosure(theme) {
   const g = new THREE.Group();
   const H = ROOM.height;
-  const noShadow = { cast: false, receive: true };
 
-  // A wall made of a sill band, a lintel band and pillars, leaving window
-  // holes open to the stars behind the page.
-  const windowedWall = (length, windows, place) => {
-    const winW = 2.3;
-    const pillar = (length - windows * winW) / (windows + 1);
-    const parts = [
-      [0, length, 0, 0.95],
-      [0, length, 2.45, H],
-    ];
-    for (let i = 0; i <= windows; i++) parts.push([i * (pillar + winW), pillar, 0.95, 2.45]);
-    for (const [start, len, y0, y1] of parts) {
-      const w = box(len, y1 - y0, 0.3, theme.wall, 0, 0, 0, noShadow);
-      place(w, -length / 2 + start + len / 2, (y0 + y1) / 2);
-      g.add(w);
-    }
-    // Chunky frames and a sill on each window.
-    for (let i = 0; i < windows; i++) {
-      const cx = -length / 2 + pillar + i * (pillar + winW) + winW / 2;
-      const sill = box(winW + 0.2, 0.08, 0.42, theme.wallTrim, 0, 0, 0, noShadow);
-      place(sill, cx, 0.97);
-      g.add(sill);
-      const mullion = box(0.07, 1.5, 0.12, theme.wallTrim, 0, 0, 0, noShadow);
-      place(mullion, cx, 1.7);
-      g.add(mullion);
-      const transom = box(winW, 0.07, 0.12, theme.wallTrim, 0, 0, 0, noShadow);
-      place(transom, cx, 1.95);
-      g.add(transom);
-    }
-  };
+  // The front wall: window holes open to the stars behind the page, with
+  // chunky frames and a sill on each.
+  const front = new THREE.Group();
+  front.position.z = 6.15;
+  const winW = 2.3;
+  const length = 16.6;
+  const windows = 5;
+  const pillar = (length - windows * winW) / (windows + 1);
+  const holes = Array.from({ length: windows }, (_, i) => ({
+    at: -length / 2 + pillar + i * (pillar + winW) + winW / 2, width: winW, bottom: 0.95, top: 2.45,
+  }));
+  front.add(openWall(length, H, holes, theme.wall));
+  for (const { at } of holes) {
+    front.add(box(winW + 0.2, 0.08, 0.42, theme.wallTrim, at, 0.97, 0, NO_SHADOW));
+    front.add(box(0.07, 1.5, 0.12, theme.wallTrim, at, 1.7, 0, NO_SHADOW));
+    front.add(box(winW, 0.07, 0.12, theme.wallTrim, at, 1.95, 0, NO_SHADOW));
+  }
+  g.add(front);
 
-  windowedWall(16.6, 5, (m, along, y) => m.position.set(along, y, 6.15));
-  windowedWall(12.6, 4, (m, along, y) => {
-    m.rotation.y = Math.PI / 2;
-    m.position.set(8.15, y, -along);
-  });
+  // The right wall is the living room's and the spare room's (house/).
 
   // Ceiling with exposed beams and hanging shop lamps.
-  g.add(box(16.9, 0.2, 12.9, '#c9cfc6', 0, H + 0.1, 0, noShadow));
-  for (let i = 0; i < 6; i++) g.add(box(0.18, 0.25, 12.3, PALETTE.woodDark, -6.9 + i * 2.75, H - 0.12, 0.15, noShadow));
+  g.add(box(16.9, 0.2, 12.9, '#c9cfc6', 0, H + 0.1, 0, NO_SHADOW));
+  for (let i = 0; i < 6; i++) g.add(box(0.18, 0.25, 12.3, PALETTE.woodDark, -6.9 + i * 2.75, H - 0.12, 0.15, NO_SHADOW));
   for (const x of [-4.4, 0, 4.4]) {
     for (const z of [-3.2, 0.2, 3.6]) {
-      g.add(cyl(0.008, 0.008, 0.7, '#333', 6, noShadow).translateX(x).translateY(H - 0.35).translateZ(z));
-      const shade = mesh(new THREE.ConeGeometry(0.28, 0.22, 20, 1, true), toon('#2f6f8f', { side: THREE.DoubleSide }), noShadow);
+      g.add(cyl(0.008, 0.008, 0.7, '#333', 6, NO_SHADOW).translateX(x).translateY(H - 0.35).translateZ(z));
+      const shade = mesh(new THREE.ConeGeometry(0.28, 0.22, 20, 1, true), toon('#2f6f8f', { side: THREE.DoubleSide }), NO_SHADOW);
       shade.position.set(x, H - 0.8, z);
       g.add(shade);
-      g.add(sphere(0.08, glow('#fff3c4'), 12, noShadow).translateX(x).translateY(H - 0.9).translateZ(z));
+      g.add(sphere(0.08, glow('#fff3c4'), 12, NO_SHADOW).translateX(x).translateY(H - 0.9).translateZ(z));
     }
   }
   return g;

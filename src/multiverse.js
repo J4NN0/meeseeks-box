@@ -149,7 +149,7 @@ export class Multiverse {
   }
 
   tick(dt, t, now, camera) {
-    this.active.world.update(dt, t, now);
+    this.active.world.update(dt, t, now, camera);
     this.active.manager.tick(dt, t, now, camera);
     for (const u of this.universes) {
       if (u !== this.active && u.level > 0 && u.built && now - u.leftAt > KEEP_WARM_MS) u.dispose(this.keep);

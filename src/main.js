@@ -8,7 +8,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { InkRenderer, enableInkLayers } from './engine/outline.js';
 import { Walker, EYE_HEIGHT } from './engine/walker.js';
-import { ROOM, WALK_BOUNDS, PORTAL } from './world/room.js';
+import { SITE, WALK_BOUNDS, PORTAL } from './world/room.js';
 import { Multiverse } from './multiverse.js';
 import { verse } from './world/verses.js';
 import { CAPACITY } from './agents/seating.js';
@@ -46,7 +46,8 @@ app.appendChild(labels.domElement);
 
 const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 200);
 enableInkLayers(camera);
-const HOME = { eye: new THREE.Vector3(10.8, 12.4, 20.5), look: new THREE.Vector3(0.3, 0.2, 0.1) };
+// The garage and the living room next door, from the front right.
+const HOME = { eye: new THREE.Vector3(14.8, 16.2, 26.7), look: new THREE.Vector3(3.3, 0.2, -0.4) };
 // Where you "stand" when you step into the room: just behind the box.
 const WALK_START = { eye: new THREE.Vector3(0, EYE_HEIGHT, 5.6), look: new THREE.Vector3(0, 1.2, 0) };
 const WALK_FOV = 70;
@@ -57,7 +58,7 @@ controls.target.copy(HOME.look);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance = 2.5;
-controls.maxDistance = 34;
+controls.maxDistance = 40;
 // Don't let the overview dip below the floor line; board close-ups relax it.
 const ORBIT_MAX_POLAR = 1.42;
 controls.maxPolarAngle = ORBIT_MAX_POLAR;
@@ -259,7 +260,24 @@ function act(action) {
     else hud.toast(emptyVerse(action.level));
   } else if (action.kind === 'hood') {
     toggleHood();
+  } else if (action.kind === 'remote') {
+    if (traveling) return;
+    here().world.room.living.changeChannel();
+    watchTv();
+  } else if (action.kind === 'tv') {
+    watchTv();
   }
+}
+
+/** In the overview, fly round behind the living room couch to watch TV. */
+function watchTv() {
+  if (traveling || view !== 'orbit') return;
+  const { eye, look } = here().world.room.living.view;
+  if (camera.position.distanceTo(eye) < 0.5) return;
+  focused = null;
+  leaveBoard();
+  hud.hidePanel();
+  flyTo(eye.clone(), look.clone());
 }
 
 /** Focuses an agent by id, travelling to its universe first if need be. */
@@ -399,6 +417,7 @@ function enterGate(level) {
 
 /** Clicking the car: pop the hood for a look, or shut it again. */
 function toggleHood() {
+  if (traveling) return;
   const { world } = here();
   if (world.battery.open) {
     hud.toast(`🔋 The hood stays open while agents work in the ${world.battery.inside}.`);
@@ -555,6 +574,8 @@ function pick(ndc, maxDistance = Infinity) {
       return { action: { id: 'gate-hint', kind: 'hint', level, label: `${name} · ${open ? `${n} agent${n === 1 ? '' : 's'}` : 'empty'}` } };
     }
     if (d.car) return { car: true, action: { id: 'car', kind: 'hood', label: 'Car' } };
+    if (d.remote) return { remote: true, action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
+    if (d.livingTv) return { tv: true, action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
     if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
     if (hit.object.isMesh && !hit.object.material.transparent) return null;
   }
@@ -597,7 +618,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     // A board's items only react once you've flown up to it.
     if (target?.board && target.board !== focusedBoard) target.action = null;
     setPointed(target);
-    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car));
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv));
     pendingMove = null;
   });
   pendingMove = e;
@@ -642,6 +663,8 @@ window.addEventListener('keydown', (e) => {
 
 // Loop ------------------------------------------------------------------------------
 let baseFov = 30;
+/** How wide (degrees, side to side) the overview must see to fit the office. */
+const HOME_FOV_ACROSS = 44;
 function resize() {
   const w = app.clientWidth;
   const h = app.clientHeight;
@@ -649,8 +672,9 @@ function resize() {
   labels.setSize(w, h);
   ink.setSize(w, h, renderer.getPixelRatio());
   camera.aspect = w / h;
-  // Pull back on narrow screens so the whole office still fits.
-  baseFov = w / h < 1 ? 42 : 30;
+  // Widen the lens on narrower screens so the whole office still fits.
+  const across = Math.tan(THREE.MathUtils.degToRad(HOME_FOV_ACROSS / 2));
+  baseFov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(across / (w / h))), 30, 55);
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
@@ -673,7 +697,7 @@ renderer.setAnimationLoop((timestamp) => {
   // Back from a board close-up: restore the overview's limit once we're out.
   if (!focusedBoard && !flight && controls.maxPolarAngle !== ORBIT_MAX_POLAR) controls.maxPolarAngle = ORBIT_MAX_POLAR;
   if (view === 'orbit') {
-    controls.target.set(clamp(controls.target.x, ROOM.minX, ROOM.maxX), clamp(controls.target.y, 0, 3), clamp(controls.target.z, ROOM.minZ, ROOM.maxZ));
+    controls.target.set(clamp(controls.target.x, SITE.minX, SITE.maxX), clamp(controls.target.y, 0, 3), clamp(controls.target.z, SITE.minZ, SITE.maxZ));
     controls.update();
   } else if (!flight) {
     walker.update(dt);
