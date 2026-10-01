@@ -3,19 +3,33 @@ import { buildRoom } from './room.js';
 import { Desk } from './desk.js';
 import { Effects } from './effects.js';
 import { createMeeseeksBox } from './box.js';
+import { createBattery } from './battery.js';
+import { verse } from './verses.js';
 
 const COLS = [-3.3, -1.1, 1.1, 3.3];
 const ROWS = [-3.5, -1.1, 1.3];
+export const DESK_COUNT = COLS.length * ROWS.length;
 // Fill from the camera side first so the first few agents are big and clear.
 const FILL_ORDER = [[2, 1], [2, 2], [1, 1], [1, 2], [2, 0], [2, 3], [1, 0], [1, 3], [0, 1], [0, 2], [0, 0], [0, 3]];
 // Overflow agents without a desk hang out in the chill zone.
 const LOUNGE = [[-5.0, 3.1, 2.3], [-4.0, 4.2, 2.6], [-6.4, 4.4, 1.2], [5.0, 0.8, -1.2], [5.0, 4.6, -2.0], [7.5, 1.0, -1.8], [-3.6, 5.3, 3.0], [3.4, 5.2, 3.0]];
 
+// Right of the last desk column, so walks to and from the car stay clear.
+const SIDE_AISLE_X = 4.62;
+
+/**
+ * One office: the garage (level 0) or a universe in a car battery. `boards`
+ * are the shared wall boards; `onEnterGate` runs when this office's battery
+ * tag is clicked.
+ */
 export class World {
-  constructor(scene) {
+  constructor(scene, { level = 0, boards, onEnterGate } = {}) {
     this.scene = scene;
-    this.room = buildRoom(scene);
+    this.level = level;
+    this.room = buildRoom(scene, { theme: verse(level), ...boards });
     this.effects = new Effects(scene);
+    this.battery = createBattery({ inside: verse(level + 1).name, onEnter: () => onEnterGate?.(level + 1) });
+    scene.add(this.battery.group);
 
     this.box = createMeeseeksBox();
     this.box.group.position.set(0, 0, 4.05);
@@ -69,9 +83,20 @@ export class World {
     return [new THREE.Vector3(s.x, 0, s.z - 0.2), new THREE.Vector3(0, 0, target.z), target.clone()];
   }
 
+  /** Out of the battery, up the side aisle, then along the row. */
+  pathFromBattery(target) {
+    return [new THREE.Vector3(SIDE_AISLE_X, 0, target.z), target.clone()];
+  }
+
+  /** Along the row to the side aisle, then into the battery. */
+  pathToBattery(from) {
+    return [new THREE.Vector3(SIDE_AISLE_X, 0, from.z), this.battery.mouth.clone()];
+  }
+
   update(dt, t, now) {
     this.room.update(dt, t);
     this.box.update(dt, t);
+    this.battery.update(dt, t);
     this.effects.update(dt);
     for (const d of this.desks) d.update(dt, t, now);
   }

@@ -1,5 +1,5 @@
 import { agentColor } from '../characters/index.js';
-import { formatDuration, testSummary } from '../status.js';
+import { STATUS_LABELS, formatDuration, testSummary } from '../status.js';
 import { Board } from './board.js';
 import { fit, wrap } from './screens.js';
 
@@ -31,7 +31,7 @@ export class RecapBoard extends Board {
   }
 
   draw(today, agents, now) {
-    const status = new Map(agents.filter((a) => a.phase !== 'gone').map((a) => [a.id, a.visualStatus]));
+    const status = new Map(agents.map((a) => [a.id, a.visualStatus]));
     const key = `${today?.now}|${[...status].join(',')}|${Math.floor(now / 30_000)}`;
     if (!this.begin(key, [today, agents, now])) return;
     const { ctx, canvas } = this;
@@ -79,7 +79,7 @@ export class RecapBoard extends Board {
 
   note(p, i, x, y, w, h, today, now) {
     const { ctx } = this;
-    const action = { id: `project:${p.key}`, kind: 'project', key: p.key, label: `${p.name} · open today’s recap` };
+    const action = { id: `project:${p.key}`, kind: 'project', key: p.key, label: p.name };
     const hot = this.isHovered(action);
     ctx.save();
     ctx.translate(x + w / 2, y + h / 2);
@@ -201,7 +201,7 @@ export class RecapBoard extends Board {
       const color = colorOf(s);
       const live = status.get(s.id);
       const label = live
-        ? { id: `agent:${s.id}`, kind: 'agent', agentId: s.id, label: `${s.project} · go to agent` }
+        ? { id: `agent:${s.id}`, kind: 'agent', agentId: s.id, label: `${s.project} · ${(STATUS_LABELS[live] || live).toLowerCase()}` }
         : { id: `session:${s.id}`, kind: 'project', key: s.projectKey, focus: { sessionId: s.id }, label: `${s.title} · ended` };
       const hotLabel = this.isHovered(label);
 

@@ -14,7 +14,7 @@ const LEGEND_STATUSES = [
 ];
 
 export class Hud {
-  constructor({ mode, onModeChange, onWalk, onReset, onClosePanel, onGoToAgent }) {
+  constructor({ mode, onModeChange, onWalk, onReset, onClosePanel, onGoToAgent, onVerse }) {
     const select = $('mascot-mode');
     for (const [value, label] of Object.entries(MASCOT_MODES)) select.add(new Option(label, value, false, value === mode));
     select.addEventListener('change', () => onModeChange(select.value));
@@ -30,6 +30,13 @@ export class Hud {
       '<hr />',
       ...LEGEND_STATUSES.map(([s, label]) => `<div><i class="st" style="--c: ${STATUS_COLORS[s]}"></i>${esc(label)}</div>`),
     ].join('');
+
+    this.verses = $('verses');
+    this.versesKey = '';
+    this.verses.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-level]');
+      if (go) onVerse?.(Number(go.dataset.level));
+    });
 
     this.panel = $('panel');
     this.panelBody = $('panel-body');
@@ -110,8 +117,22 @@ export class Hud {
     if (all.length > 4) all[0].remove();
   }
 
+  /**
+   * Breadcrumb of the open universes (garage › Microverse › …), each one a
+   * button to jump there. Hidden while the garage is all there is.
+   */
+  setVerses(list, active) {
+    const key = JSON.stringify([list, active]);
+    if (key === this.versesKey) return;
+    this.versesKey = key;
+    this.verses.hidden = list.length < 2;
+    this.verses.innerHTML = list.map((v, i) => `${i ? '<span class="sep">›</span>' : ''}<button type="button" data-level="${v.level}"${v.level === active ? ' aria-current="true"' : ''}${v.open ? '' : ' disabled'} title="${v.level === active ? `You're in the ${esc(v.name)}` : `Go to the ${esc(v.name)}`}">
+      <span>${v.level ? '🔋' : '🏠'} ${esc(v.name)}</span><span class="n">${v.count}</span>${v.waiting ? '<i class="waiting" title="Someone here needs you"></i>' : ''}
+    </button>`).join('');
+  }
+
   announce(type, agent) {
-    const who = `<b>${esc(agent.session.project || agent.session.title)}</b>`;
+    const who = `<b>${esc(agent.session.project || agent.session.title)}</b>${agent.where ? ` in the ${esc(agent.where)}` : ''}`;
     if (type === 'spawn') this.toast(`🟦 ${KIND_NAMES[agent.kind] || 'An agent'} appeared for ${who}`, agent.colorHex);
     if (type === 'leave') this.toast(`✨ ${who} is done. *poof*`, agent.colorHex);
     if (type === 'waiting') this.toast(`🙋 ${who} is waiting on you`, agent.colorHex);

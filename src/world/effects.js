@@ -5,6 +5,7 @@ import { ownToon } from '../engine/toon.js';
 // transparent smoke, so they get ink outlines like everything else.
 
 const puffGeometry = new THREE.IcosahedronGeometry(1, 2);
+puffGeometry.userData.shared = true;
 
 export class Effects {
   constructor(scene) {

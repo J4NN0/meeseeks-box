@@ -1,47 +1,62 @@
 import { Agent } from './agent.js';
 
-// Keeps the room in sync with the list of sessions: new sessions spawn an
-// agent, vanished ones poof. A short grace period stops a flaky poll from
-// making Meeseeks blink in and out of existence.
+// Keeps one office in sync with the sessions seated in it: new sessions
+// spawn an agent, vanished ones poof. The multiverse decides who sits where
+// (and smooths over flaky polls), so whatever isn't in the list leaves now.
 
-const GRACE_MS = 5000;
 const SPAWN_STAGGER_S = 1.3;
 
 export class AgentManager {
-  constructor(world, { onEvent, onClick } = {}) {
+  constructor(world, { onClick } = {}) {
     this.world = world;
     this.agents = new Map();
     this.mode = 'meeseeks';
-    this.onEvent = onEvent || (() => {});
     this.onClick = onClick;
     this.queue = [];
     this.spawnCooldown = 0;
   }
 
-  sync(sessions, now) {
-    const seen = new Set();
+  /**
+   * `instant` skips every animation (for offices you aren't looking at).
+   * `departures` says why an agent left (id -> 'down' | 'up', default
+   * 'ended'); `entries` how an arrival comes in (id -> 'box' | 'battery').
+   */
+  sync(sessions, now, { instant = false, departures, entries } = {}) {
+    const incoming = new Map(sessions.map((s) => [s.id, s]));
+    for (const [id, agent] of this.agents) {
+      const outgoing = agent.phase === 'leaving' || agent.phase === 'departing' || agent.phase === 'gone';
+      if (incoming.has(id) && !outgoing) continue;
+      // Offices you aren't in don't animate, so finish any exit right away
+      // (and re-spawn below if the session was seated back here).
+      if (instant) {
+        agent.destroy();
+        this.agents.delete(id);
+      } else if (!outgoing) {
+        agent.leave(departures?.get(id));
+      }
+    }
+    this.queue = this.queue.filter((q) => incoming.has(q.session.id));
     for (const s of sessions) {
-      seen.add(s.id);
       const agent = this.agents.get(s.id);
-      if (agent && agent.phase !== 'leaving' && agent.phase !== 'gone') {
-        const before = agent.session.status;
-        agent.update(s);
-        if (before !== 'waiting' && s.status === 'waiting') this.onEvent('waiting', agent);
-      } else if (!agent) {
-        const queued = this.queue.find((q) => q.id === s.id);
-        if (queued) Object.assign(queued, s);
-        else this.queue.push(s);
+      if (agent) {
+        if (agent.phase !== 'leaving' && agent.phase !== 'departing' && agent.phase !== 'gone') agent.update(s);
+        continue;
       }
-    }
-    this.queue = this.queue.filter((q) => seen.has(q.id));
-    for (const agent of this.agents.values()) {
-      if (seen.has(agent.id) || agent.phase === 'leaving' || agent.phase === 'gone') continue;
-      agent.missingSince ||= now;
-      if (now - agent.missingSince > GRACE_MS) {
-        agent.leave();
-        this.onEvent('leave', agent);
+      if (instant) {
+        this.queue = this.queue.filter((q) => q.session.id !== s.id);
+        this.spawn(s, now, { instant: true });
+        continue;
       }
+      const queued = this.queue.find((q) => q.session.id === s.id);
+      if (queued) queued.session = s;
+      else this.queue.push({ session: s, entry: entries?.get(s.id) || 'box' });
     }
+  }
+
+  spawn(session, now, opts) {
+    const agent = new Agent(session, this.world, { mode: this.mode, onClick: this.onClick, now, ...opts });
+    this.agents.set(session.id, agent);
+    return agent;
   }
 
   setMode(mode) {
@@ -53,11 +68,9 @@ export class AgentManager {
     // Spawn one at a time so a page load with ten sessions becomes a parade.
     this.spawnCooldown -= dt;
     if (this.queue.length && this.spawnCooldown <= 0) {
-      const s = this.queue.shift();
-      const agent = new Agent(s, this.world, { mode: this.mode, onClick: this.onClick, now });
-      this.agents.set(s.id, agent);
+      const { session, entry } = this.queue.shift();
+      this.spawn(session, now, { entry });
       this.spawnCooldown = SPAWN_STAGGER_S;
-      this.onEvent('spawn', agent);
     }
     for (const [id, agent] of this.agents) {
       agent.tick(dt, t, now, camera);
@@ -68,11 +81,14 @@ export class AgentManager {
     if (desk) lounger.moveToDesk(desk);
   }
 
-  list() {
-    return [...this.agents.values()].filter((a) => a.phase !== 'gone');
-  }
-
   byId(id) {
     return this.agents.get(id);
+  }
+
+  /** Removes everyone at once, no poofs: the office is being torn down. */
+  clear() {
+    for (const agent of this.agents.values()) agent.destroy();
+    this.agents.clear();
+    this.queue = [];
   }
 }

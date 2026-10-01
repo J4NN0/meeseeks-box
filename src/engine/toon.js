@@ -41,6 +41,10 @@ function gradientMap() {
 }
 
 const shared = new Map();
+const sharedSet = new WeakSet();
+
+/** Materials from toon()/glow() are used by every office: never dispose them. */
+export const isShared = (material) => sharedSet.has(material);
 
 /** Shared toon material for static props. Do not mutate the result. */
 export function toon(color, opts = {}) {
@@ -49,6 +53,7 @@ export function toon(color, opts = {}) {
   if (!m) {
     m = new THREE.MeshToonMaterial({ color, gradientMap: gradientMap(), ...opts });
     shared.set(key, m);
+    sharedSet.add(m);
   }
   return m;
 }
@@ -65,6 +70,7 @@ export function glow(color, opts = {}) {
   if (!m) {
     m = new THREE.MeshBasicMaterial({ color, ...opts });
     shared.set(key, m);
+    sharedSet.add(m);
   }
   return m;
 }

@@ -163,29 +163,29 @@ export class TerminalScreen {
 
 // ---------------------------------------------------------------- neon sign
 
-export function neonSignTexture() {
+export function neonSignTexture({ title = 'MEESEEKS BOX', sub = '✦ existence is pain · we are hiring ✦', glow = ['#ff4fa3', '#ff79b8'], core = '#ffe3f1' } = {}) {
   const { canvas, ctx, texture } = canvasTexture(1024, 300);
   const draw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.textAlign = 'center';
     ctx.lineJoin = 'round';
     ctx.font = '120px "Luckiest Guy", "Arial Rounded MT Bold", system-ui';
-    for (const [blur, color] of [[40, '#ff4fa3'], [18, '#ff79b8']]) {
+    for (const [blur, color] of [[40, glow[0]], [18, glow[1]]]) {
       ctx.shadowBlur = blur;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 10;
-      ctx.strokeText('MEESEEKS BOX', 512, 150);
+      ctx.strokeText(title, 512, 150);
     }
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = '#ffe3f1';
+    ctx.strokeStyle = core;
     ctx.lineWidth = 3;
-    ctx.strokeText('MEESEEKS BOX', 512, 150);
+    ctx.strokeText(title, 512, 150);
     ctx.font = '600 44px "Patrick Hand", "Marker Felt", system-ui';
     ctx.shadowBlur = 20;
     ctx.shadowColor = '#4ff2ff';
     ctx.fillStyle = '#bafcff';
-    ctx.fillText('✦ existence is pain · we are hiring ✦', 512, 240);
+    ctx.fillText(sub, 512, 240);
     texture.needsUpdate = true;
   };
   draw();

@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { createMascot, mascotKind, agentColor } from '../characters/index.js';
-import { STATUS_COLORS, STATUS_LABELS, STATUS_SITUATIONS, formatDuration, providerInfo, statusSince } from '../status.js';
-import { CONFIG } from '../config.js';
+import { STATUS_COLORS, STATUS_LABELS, STATUS_SITUATIONS, formatDuration, providerInfo, statusSince, visualStatus } from '../status.js';
 import { line } from './lines.js';
 
 const { damp } = THREE.MathUtils;
@@ -13,10 +12,14 @@ const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 
 
 /**
  * One agent session made flesh: spawns from the Meeseeks Box, walks to a
- * free desk, works (or panics) while the session runs, then poofs.
+ * free desk, works (or panics) while the session runs, then poofs. Agents
+ * moving between the garage and the universes in its car battery walk into
+ * the battery or pop out of it instead (`entry: 'battery'`, `leave('down')`),
+ * and an office built while you weren't looking starts with everyone
+ * already at their desks (`instant`).
  */
 export class Agent {
-  constructor(session, world, { mode, onClick, now }) {
+  constructor(session, world, { mode, onClick, now, instant = false, entry = 'box' }) {
     this.id = session.id;
     this.session = session;
     this.world = world;
@@ -25,7 +28,6 @@ export class Agent {
     this.phaseTime = 0;
     this.visualStatus = session.status;
     this.lastStatus = null;
-    this.missingSince = 0;
     this.nextChatter = 8 + Math.random() * 12;
     this.bubbleTime = 0;
     this.helpers = [];
@@ -36,21 +38,63 @@ export class Agent {
     this.kind = mascotKind(mode, session.provider, session.id);
     this.character = this.makeCharacter(this.kind);
     world.scene.add(this.character.root);
-    // Jitter the spawn spot so back-to-back arrivals don't overlap.
-    this.spawnPoint = world.spawnPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.3));
-    this.character.root.position.copy(this.spawnPoint);
-    this.character.root.scale.setScalar(0.01);
-    this.character.setMood('cheer');
 
     this.desk = world.claimDesk(this);
     this.lounge = this.desk ? null : world.claimLounge(this);
     this.target = this.desk ? this.desk.approachWorld() : this.lounge.position.clone();
-    this.path = world.pathTo(this.target);
-
     this.buildLabel();
-    world.box.press();
-    world.effects.poof(this.spawnPoint.clone().add(new THREE.Vector3(0, 0.1, 0)), { scale: 1.1 });
-    this.say(line(this.kind, 'spawn'), 2.6);
+    if (instant) {
+      this.settle(now);
+      return;
+    }
+
+    if (entry === 'battery') {
+      // Promoted out of the universe in the battery: pops out of the box in
+      // the car's engine bay and hops down beside the car.
+      this.spawnPoint = world.battery.mouth.clone();
+      this.emergeFrom = world.battery.core.clone();
+      this.path = world.pathFromBattery(this.target);
+      world.battery.zap();
+      world.effects.poof(this.emergeFrom, { scale: 0.5, count: 10 });
+      this.say(line(this.kind, 'up'), 2.4);
+    } else {
+      // Jitter the spawn spot so back-to-back arrivals don't overlap.
+      this.spawnPoint = world.spawnPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.3));
+      this.path = world.pathTo(this.target);
+      world.box.press();
+      world.effects.poof(this.spawnPoint.clone().add(new THREE.Vector3(0, 0.1, 0)), { scale: 1.1 });
+      this.say(line(this.kind, 'spawn'), 2.6);
+    }
+    this.character.root.position.copy(this.spawnPoint);
+    this.character.root.scale.setScalar(0.01);
+    this.character.setMood('cheer');
+  }
+
+  /** Straight into place, skipping the walk and the easing into the pose. */
+  settle(now) {
+    const c = this.character;
+    const root = c.root;
+    const status = this.computeStatus(now);
+    this.visualStatus = status;
+    this.lastStatus = status;
+    if (this.desk) {
+      this.desk.seat.add(root);
+      root.position.set(0, 0, 0);
+      root.rotation.set(0, 0, 0);
+      c.setMode('sit');
+      c.setMood(this.moodFor(status));
+      this.desk.swivelTarget = status === 'waiting' ? Math.PI : 0;
+      this.desk.swivel.rotation.y = this.desk.swivelTarget;
+      this.setPhase('seated');
+      this.syncHelpers(0, true);
+    } else {
+      root.position.copy(this.lounge.position);
+      root.rotation.y = this.lounge.rotation;
+      c.setMode('stand');
+      c.setMood(status === 'waiting' ? 'cheer' : 'idle');
+      this.setPhase('lounging');
+    }
+    for (let i = 0; i < 15; i++) c.update(0.1, i * 0.1);
   }
 
   makeCharacter(kind) {
@@ -106,7 +150,8 @@ export class Agent {
     const last = s.activity.findLast((a) => a.kind !== 'think') || s.activity.at(-1);
     setText(this.whoEl, s.project || p.name);
     setText(this.stEl, `${STATUS_LABELS[status] || status}${since ? ` · ${formatDuration(now - since)}` : ''}`);
-    setText(this.doingEl, status === 'sleeping' ? 'zzz…' : status === 'leaving' ? '✨ poof!' : last ? `${last.icon || ''} ${last.text}` : s.title);
+    const doing = this.phase === 'departing' ? `🔋 off to the ${this.world.battery.inside}` : status === 'sleeping' ? 'zzz…' : status === 'leaving' ? '✨ poof!' : last ? `${last.icon || ''} ${last.text}` : s.title;
+    setText(this.doingEl, doing);
     const title = `${p.name} · ${s.title}`;
     if (this.el.title !== title) this.el.title = title;
   }
@@ -125,9 +170,7 @@ export class Agent {
 
   computeStatus(now) {
     if (this.phase === 'leaving' || this.phase === 'gone') return 'leaving';
-    const s = this.session;
-    if (s.status === 'working' && s.turnStartedAt && now - s.turnStartedAt > CONFIG.stressAfterMs) return 'stressed';
-    return s.status;
+    return visualStatus(this.session, now);
   }
 
   moodFor(status) {
@@ -140,15 +183,49 @@ export class Agent {
 
   update(session) {
     this.session = session;
-    this.missingSince = 0;
   }
 
-  leave() {
-    if (this.phase === 'leaving' || this.phase === 'gone') return;
+  /**
+   * `ended`: the session is over, poof. `down`: moving deeper into the
+   * battery, so walk over and hop in. `up`: moving to an office upstairs.
+   */
+  leave(reason = 'ended') {
+    if (this.phase === 'leaving' || this.phase === 'departing' || this.phase === 'gone') return;
+    if (reason === 'down' && this.phase !== 'arriving') {
+      this.depart();
+      return;
+    }
     this.prevPhase = this.phase;
     this.phase = 'leaving';
     this.phaseTime = 0;
-    this.say(line(this.kind, 'done'), 1.6);
+    // Poofs right here, saying why: the session ended, it's needed upstairs,
+    // or it was bumped down before it even reached a desk.
+    this.say(line(this.kind, reason === 'ended' ? 'done' : reason), 1.6);
+  }
+
+  depart() {
+    const root = this.character.root;
+    // Back to the aisle behind the chairs first, not through the next chair.
+    const aisle = this.desk ? this.desk.approachWorld() : root.getWorldPosition(new THREE.Vector3());
+    this.world.scene.attach(root);
+    if (this.desk) {
+      this.desk.agent = null;
+      this.desk.swivelTarget = 0;
+      this.desk.setStatus(null);
+      this.desk.screen.lastKey = '';
+      this.desk = null;
+    }
+    this.world.releaseLounge(this.lounge);
+    this.lounge = null;
+    for (const h of this.helpers) {
+      this.world.effects.poof(h.root.getWorldPosition(new THREE.Vector3()), { scale: 0.5, count: 6 });
+      h.character.dispose();
+    }
+    this.helpers = [];
+    this.path = [aisle, ...this.world.pathToBattery(aisle)];
+    this.sink = 0;
+    this.setPhase('departing');
+    this.say(line(this.kind, 'down'), 2.4);
   }
 
   setMascot(mode) {
@@ -203,6 +280,7 @@ export class Agent {
       case 'arriving': {
         const k = Math.min(1, this.phaseTime / 0.5);
         root.scale.setScalar(elasticOut(k));
+        if (this.emergeFrom) hop(root.position, this.emergeFrom, this.spawnPoint, k);
         c.setMode('stand');
         c.setMood('cheer');
         root.rotation.y = damp(root.rotation.y, 0, 6, dt);
@@ -211,21 +289,31 @@ export class Agent {
       }
       case 'walking': {
         c.setMode('walk');
-        const next = this.path[0];
-        if (!next) {
+        if (this.walkPath(dt)) {
           this.setPhase(this.desk ? 'turning' : 'lounging');
           break;
         }
-        const d = next.clone().sub(root.position);
-        d.y = 0;
-        const dist = d.length();
-        if (dist < 0.05) {
-          this.path.shift();
-        } else {
-          root.position.addScaledVector(d.normalize(), Math.min(dist, WALK_SPEED * dt));
-          root.rotation.y = dampAngle(root.rotation.y, Math.atan2(d.x, d.z), 10, dt);
-        }
         if (this.desk && this.path.length <= 1) this.desk.swivelTarget = Math.PI;
+        break;
+      }
+      case 'departing': {
+        if (!this.walkPath(dt)) {
+          c.setMode('walk');
+          break;
+        }
+        // Beside the car: hop up into the box in the engine bay, shrinking.
+        c.setMode('stand');
+        c.setMood('cheer');
+        if (this.sink === 0) this.sinkFrom = root.position.clone();
+        this.sink += dt;
+        const k = Math.min(1, this.sink / 0.45);
+        hop(root.position, this.sinkFrom, this.world.battery.core, k);
+        root.scale.setScalar(Math.max(0.02, (1 - k) ** 1.5));
+        if (k >= 1) {
+          this.world.battery.zap();
+          this.world.effects.poof(this.world.battery.core, { scale: 0.45, count: 8 });
+          this.destroy();
+        }
         break;
       }
       case 'turning': {
@@ -365,6 +453,23 @@ export class Agent {
     this.phaseTime = 0;
   }
 
+  /** Walks along `path`; true once at the end of it. */
+  walkPath(dt) {
+    const root = this.character.root;
+    const next = this.path[0];
+    if (!next) return true;
+    const d = next.clone().sub(root.position);
+    d.y = 0;
+    const dist = d.length();
+    if (dist < 0.05) {
+      this.path.shift();
+    } else {
+      root.position.addScaledVector(d.normalize(), Math.min(dist, WALK_SPEED * dt));
+      root.rotation.y = dampAngle(root.rotation.y, Math.atan2(d.x, d.z), 10, dt);
+    }
+    return false;
+  }
+
   setHighlight(on) {
     this.character.setHighlight(on);
     this.el.classList.toggle('hover', on);
@@ -402,6 +507,12 @@ export class Agent {
 
 function setText(el, text) {
   if (el.textContent !== text) el.textContent = text;
+}
+
+/** Along a little arc from `a` to `b` (k from 0 to 1). */
+function hop(out, a, b, k) {
+  out.lerpVectors(a, b, k);
+  out.y += Math.sin(k * Math.PI) * 0.45;
 }
 
 function elasticOut(x) {

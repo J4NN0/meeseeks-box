@@ -1,6 +1,8 @@
 // Session statuses and providers as the whole app shows them: room, labels
 // and HUD all read their colours, names and timers from here.
 
+import { CONFIG } from './config.js';
+
 export const STATUS_COLORS = {
   working: '#7ee07e',
   stressed: '#ff6b5b',
@@ -16,6 +18,12 @@ export const STATUS_LABELS = {
   sleeping: 'Napping',
   leaving: 'Task done!',
 };
+
+/** The status to show: a turn running for too long is "stressed". */
+export function visualStatus(session, now) {
+  if (session.status === 'working' && session.turnStartedAt && now - session.turnStartedAt > CONFIG.stressAfterMs) return 'stressed';
+  return session.status;
+}
 
 /** Which speech-bubble situation (see agents/lines.js) a status maps to. */
 export const STATUS_SITUATIONS = { working: 'work', stressed: 'stress', waiting: 'wait', sleeping: 'sleep' };

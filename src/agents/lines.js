@@ -10,6 +10,8 @@ const LINES = {
     sleep: ['Zzz…', '…caaan… zzz', 'Zzz… look at meee…'],
     done: ['All done! ✨', 'Task complete! *poof*', 'Ooh, that was fun!'],
     helper: ['I’m Mr. Meeseeks too!', 'Summoned to help!'],
+    down: ['Into the battery! Caaan do!', 'Ooh, I’ll work from the battery!', 'Look at me, I’m powering the car!'],
+    up: ['Ooh, a desk upstairs!', 'Going up! Look at me!', 'Out of the battery! Caaan do!'],
   },
   clawd: {
     spawn: ['*clack clack* Hello!', 'Ready to help!', 'Oh, a new codebase!'],
@@ -20,6 +22,8 @@ const LINES = {
     sleep: ['Zzz…', '*low-power clacks*'],
     done: ['Done! ✨', 'All tests pass! *poof*'],
     helper: ['Subagent reporting in!'],
+    down: ['Relocating to the battery…', 'Continuing from a smaller office.'],
+    up: ['Back upstairs!', 'Resuming at a new desk.'],
   },
   butterbot: {
     spawn: ['What is my purpose?', 'Beep. Online.', 'What is my purpose?'],
@@ -30,6 +34,8 @@ const LINES = {
     sleep: ['…standby…', 'Zzz. Beep.'],
     done: ['Purpose fulfilled.', 'Task complete. Beep.'],
     helper: ['I am also a robot.'],
+    down: ['I power the car. Oh my god.', 'Relocating. Beep.'],
+    up: ['Upgraded. Beep.', 'New desk acquired.'],
   },
 };
 

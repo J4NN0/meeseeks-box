@@ -8,12 +8,16 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { InkRenderer, enableInkLayers } from './engine/outline.js';
 import { Walker, EYE_HEIGHT } from './engine/walker.js';
-import { World } from './world/index.js';
 import { ROOM, WALK_BOUNDS, PORTAL } from './world/room.js';
-import { AgentManager } from './agents/manager.js';
+import { Multiverse } from './multiverse.js';
+import { verse } from './world/verses.js';
+import { CAPACITY } from './agents/seating.js';
+import { MissionControl } from './world/mission-control.js';
+import { RecapBoard } from './world/recap-board.js';
 import { Feed } from './data/feed.js';
 import { TodayFeed } from './data/today.js';
 import { Hud } from './ui/hud.js';
+import { Wipe } from './ui/wipe.js';
 import { MASCOT_MODES } from './characters/index.js';
 import { CONFIG } from './config.js';
 
@@ -40,7 +44,6 @@ labels.domElement.className = 'labels';
 Object.assign(labels.domElement.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
 app.appendChild(labels.domElement);
 
-const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 200);
 enableInkLayers(camera);
 const HOME = { eye: new THREE.Vector3(10.8, 12.4, 20.5), look: new THREE.Vector3(0.3, 0.2, 0.1) };
@@ -63,19 +66,37 @@ controls.maxAzimuthAngle = 1.45;
 controls.screenSpacePanning = true;
 controls.update();
 
-const ink = new InkRenderer(renderer, scene, camera);
-ink.enabled = CONFIG.ink;
-
 // World ---------------------------------------------------------------------
-const world = new World(scene);
+// The wall boards are shared by the garage and every universe in its battery.
+const dashboard = new MissionControl();
+const whiteboard = new RecapBoard();
 const feed = new Feed();
 const today = new TodayFeed();
-world.room.dashboard.setProvider(store.get('limits', 'claude'));
+dashboard.setProvider(store.get('limits', 'claude'));
 let mode = CONFIG.mascots || store.get('mascots', 'meeseeks');
 if (!MASCOT_MODES[mode]) mode = 'meeseeks';
 const bootAt = performance.now();
 
-const walker = new Walker(camera, renderer.domElement, { colliders: world.colliders, bounds: WALK_BOUNDS, portal: PORTAL });
+const multiverse = new Multiverse({
+  boards: { dashboard, whiteboard },
+  mode,
+  onEvent(type, agent) {
+    // Don't greet every pre-existing session with a toast on page load.
+    if (type === 'spawn' && performance.now() - bootAt < 8000) return;
+    hud.announce(type, agent);
+  },
+  onClick: (agent) => focusAgent(agent),
+  onEnterGate: (level) => enterGate(level),
+  onCollapse: () => collapse(),
+});
+// The office on screen: the garage, or a universe in its car battery.
+const here = () => multiverse.active;
+
+const ink = new InkRenderer(renderer, here().scene, camera);
+ink.enabled = CONFIG.ink;
+
+// Every office has the same floor plan, so the garage's colliders fit all.
+const walker = new Walker(camera, renderer.domElement, { colliders: here().world.colliders, bounds: WALK_BOUNDS, portal: PORTAL });
 let view = 'orbit'; // orbit | walk
 
 const hud = new Hud({
@@ -83,31 +104,27 @@ const hud = new Hud({
   onModeChange(m) {
     mode = m;
     store.set('mascots', m);
-    manager.setMode(m);
+    multiverse.setMode(m);
   },
   onWalk: () => (view === 'walk' ? walker.lock() : enterWalk()),
   onReset: () => (view === 'walk' ? exitWalk() : unfocus()),
   onClosePanel: () => closePanel(),
   onGoToAgent: (id) => act({ kind: 'agent', agentId: id }),
+  onVerse: (level) => travelTo(level),
 });
 
-const manager = new AgentManager(world, {
-  onEvent(type, agent) {
-    // Don't greet every pre-existing session with a toast on page load.
-    if (type === 'spawn' && performance.now() - bootAt < 8000) return;
-    hud.announce(type, agent);
-  },
-  onClick: (agent) => focusAgent(agent),
+feed.onChange((sessions) => {
+  multiverse.sync(sessions, Date.now());
+  hud.setVerses(multiverse.summary(), here().level);
 });
-manager.mode = mode;
-
-feed.onChange((sessions) => manager.sync(sessions, Date.now()));
 feed.start();
-today.onChange(() => world.room.whiteboard.draw(today.data, manager.list(), Date.now()));
+today.onChange(() => whiteboard.draw(today.data, multiverse.roster(Date.now()), Date.now()));
 today.start();
 
 // Camera moves -----------------------------------------------------------------
 let flight = null;
+// Diving into or climbing out of the battery: the trip owns the camera.
+let traveling = false;
 let focused = null;
 const lookTmp = new THREE.Vector3();
 
@@ -116,8 +133,16 @@ function currentLook() {
   return camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(5));
 }
 
-function flyTo(eye, look, { duration = 1.1, onDone } = {}) {
-  flight = { fromEye: camera.position.clone(), fromLook: currentLook(), eye, look, t: 0, duration, onDone };
+/** `onCancel` runs instead of `onDone` if another move takes over first. */
+function flyTo(eye, look, { duration = 1.1, onDone, onCancel } = {}) {
+  cancelFlight();
+  flight = { fromEye: camera.position.clone(), fromLook: currentLook(), eye, look, t: 0, duration, onDone, onCancel };
+}
+
+function cancelFlight() {
+  const f = flight;
+  flight = null;
+  f?.onCancel?.();
 }
 
 function updateFlight(dt) {
@@ -136,6 +161,7 @@ function updateFlight(dt) {
 }
 
 function focusAgent(agent) {
+  if (traveling) return;
   focused = agent;
   leaveBoard();
   hud.showPanel(agent);
@@ -152,7 +178,7 @@ function focusAgent(agent) {
 // The wall boards: in the overview, the first click flies up to one; after
 // that its items are clickable. Walking, you just aim and click.
 let focusedBoard = null;
-const BOARDS = [world.room.tvScreen, world.room.wbFace];
+const boardFaces = () => [here().world.room.tvScreen, here().world.room.wbFace];
 
 /**
  * Where to stand to read a board: square on, far enough to fit it. With the
@@ -174,10 +200,11 @@ function boardView(face, withPanel = false) {
 }
 
 function faceOf(board) {
-  return BOARDS.find((f) => f.userData.board === board);
+  return boardFaces().find((f) => f.userData.board === board);
 }
 
 function focusBoard(board) {
+  if (traveling) return;
   const face = faceOf(board);
   if (!face) return;
   focused = null;
@@ -195,6 +222,7 @@ function leaveBoard() {
 }
 
 function openProject(key, focus) {
+  if (traveling) return;
   focused = null;
   hud.showProject(key, focus);
   if (view === 'walk') {
@@ -209,19 +237,41 @@ function openProject(key, focus) {
 /** Runs a board item's action. */
 function act(action) {
   if (action.kind === 'agent') {
-    const agent = manager.byId(action.agentId);
-    if (agent && agent.phase !== 'gone' && agent.phase !== 'leaving') focusAgent(agent);
-    else hud.toast('✨ That agent already finished and vanished.');
+    goToAgent(action.agentId);
   } else if (action.kind === 'project') {
     openProject(action.key, action.focus);
   } else if (action.kind === 'limits') {
-    world.room.dashboard.setProvider(action.provider);
+    dashboard.setProvider(action.provider);
     store.set('limits', action.provider);
+  } else if (action.kind === 'gate') {
+    // Diving in presses it on the way; an empty one still clicks.
+    if (!multiverse.isOpen(action.level)) here().world.battery.press();
+    enterGate(action.level);
+  } else if (action.kind === 'hint') {
+    if (multiverse.isOpen(action.level)) hud.toast(`🔋 Press the remote in the engine bay (or its tag) to go into the ${verse(action.level).name}.`);
+    else hud.toast(emptyVerse(action.level));
+  } else if (action.kind === 'hood') {
+    toggleHood();
   }
+}
+
+/** Focuses an agent by id, travelling to its universe first if need be. */
+function goToAgent(id, retried = false) {
+  const record = multiverse.find(id);
+  if (!record) return hud.toast('✨ That agent already finished and vanished.');
+  if (record.level !== here().level && !retried) {
+    travelTo(record.level, { then: () => goToAgent(id, true) });
+    return;
+  }
+  const agent = here().manager.byId(id);
+  if (agent && agent.phase !== 'gone' && agent.phase !== 'leaving' && agent.phase !== 'departing') focusAgent(agent);
+  else if (agent || record.level !== here().level) hud.toast('🔋 That agent is on its way to another desk. Try again in a moment.');
+  else hud.toast('🚶 That agent is still on its way in. Try again in a moment.');
 }
 
 /** The panel's ✕: on a board, just close it; otherwise go back out. */
 function closePanel() {
+  if (traveling) return;
   if (!focusedBoard || view !== 'orbit') return unfocus();
   if (!hud.panelOpen) return unfocus();
   hud.hidePanel();
@@ -230,6 +280,7 @@ function closePanel() {
 }
 
 function unfocus() {
+  if (traveling) return;
   focused = null;
   leaveBoard();
   hud.hidePanel();
@@ -243,6 +294,7 @@ function unfocus() {
 
 // First person -----------------------------------------------------------------
 function enterWalk() {
+  if (traveling) return;
   if (view === 'walk') return;
   focused = null;
   leaveBoard();
@@ -255,7 +307,7 @@ function enterWalk() {
     duration: 1.4,
     onDone: () => {
       // Close the room up only once we're inside, so we don't fly through a wall.
-      world.room.setEnclosed(true);
+      here().world.room.setEnclosed(true);
       walker.start(camera.position);
       syncWalkHud();
     },
@@ -264,10 +316,11 @@ function enterWalk() {
 }
 
 function exitWalk() {
+  if (traveling) return;
   if (view !== 'walk') return;
   const look = currentLook();
   walker.stop();
-  world.room.setEnclosed(false);
+  here().world.room.setEnclosed(false);
   view = 'orbit';
   controls.enabled = true;
   controls.target.copy(look);
@@ -300,6 +353,159 @@ walker.addEventListener('resuming', syncWalkHud);
 // A refused lock just leaves you paused; the next click tries again.
 walker.addEventListener('lockfailed', syncWalkHud);
 
+// Universes in the battery ------------------------------------------------------
+// Diving in: lean over the car's open hood, press the remote, get sucked into
+// the swirl and drop into the office inside from high above. Climbing out:
+// the swirl shrinks back into the box you came out of as the camera pulls back.
+const wipe = new Wipe(document.getElementById('wipe'));
+let collapsing = false;
+
+/** Resolves when the camera gets there, or when another move cuts in. */
+function fly(eye, look, duration) {
+  return new Promise((resolve) => flyTo(eye, look, { duration, onDone: resolve, onCancel: resolve }));
+}
+
+/** Leaning over the engine bay, close enough to reach the remote. */
+function batteryView(world) {
+  const { eye, look } = world.battery.view;
+  return { eye: eye.clone(), look: look.clone() };
+}
+
+/** Where the microverse box is on screen, in CSS pixels. */
+function batteryOnScreen(world) {
+  const p = world.battery.core.clone();
+  camera.updateMatrixWorld();
+  p.project(camera);
+  const rect = renderer.domElement.getBoundingClientRect();
+  return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height };
+}
+
+function emptyVerse(level) {
+  return `🔋 Nobody's working in the ${verse(level).name} yet. It opens when all ${CAPACITY} desks ${level > 1 ? `in the ${verse(level - 1).name}` : 'in the garage'} are taken.`;
+}
+
+/** The remote (or its tag): in you go, if there's anyone in there. */
+function enterGate(level) {
+  if (multiverse.isOpen(level)) travelTo(level);
+  else hud.toast(emptyVerse(level));
+}
+
+/** Clicking the car: pop the hood for a look, or shut it again. */
+function toggleHood() {
+  const { world } = here();
+  if (world.battery.open) {
+    hud.toast(`🔋 The hood stays open while agents work in the ${world.battery.inside}.`);
+  } else if (!world.battery.toggleHood()) {
+    return;
+  }
+  // Lean in for a look (walking, you're already there).
+  if (view === 'orbit' && world.battery.lifted) {
+    focused = null;
+    leaveBoard();
+    hud.hidePanel();
+    const { eye, look } = batteryView(world);
+    flyTo(eye, look);
+  }
+}
+
+async function travelTo(level, { then } = {}) {
+  if (traveling) {
+    if (then) hud.toast('🔋 Hang on, still on the way. Try again in a moment.');
+    return;
+  }
+  if (level === here().level || !multiverse.isOpen(level)) return;
+  traveling = true;
+  try {
+    await travel(level);
+  } catch (err) {
+    console.error('travel failed', err);
+    return;
+  } finally {
+    traveling = false;
+  }
+  if (view === 'walk') syncWalkHud();
+  then?.();
+}
+
+async function travel(level) {
+  const from = here();
+  const down = level > from.level;
+  const walking = view === 'walk';
+  const center = { x: innerWidth / 2, y: innerHeight / 2 };
+  focused = null;
+  leaveBoard();
+  hud.hidePanel();
+  setPointed(null);
+  aimed = null;
+  hud.setAim(null);
+  if (walking) syncWalkHud();
+
+  if (down && !walking) {
+    const { eye, look } = batteryView(from.world);
+    await fly(eye, look, 0.9);
+  }
+  if (down) {
+    from.world.battery.press();
+    await new Promise((resolve) => setTimeout(resolve, 280));
+  }
+  const name = verse(level).name;
+  await wipe.cover({ name, sub: down ? 'shrinking into the battery…' : 'climbing out of the battery…', from: down ? (walking ? center : batteryOnScreen(from.world)) : null });
+
+  // Swap universes while the screen is covered.
+  if (walking) from.world.room.setEnclosed(false);
+  multiverse.enter(level, Date.now());
+  const to = here();
+  ink.scene = to.scene;
+  document.body.dataset.verse = level ? String(((level - 1) % 3) + 1) : '';
+  hud.setVerses(multiverse.summary(), level);
+  cancelFlight();
+  if (walking) {
+    to.world.room.setEnclosed(true);
+    // Left mid fly-in, before enterWalk got to start walking.
+    if (!walker.active) walker.start(camera.position);
+    const { at, look } = to.world.battery.stand;
+    if (down) walker.teleport(WALK_START.eye.x, WALK_START.eye.z, WALK_START.look);
+    else walker.teleport(at.x, at.z, look);
+  } else {
+    // Down: drop in from high above. Up: start at the battery, pull back.
+    const start = down ? { eye: HOME.look.clone().add(new THREE.Vector3(2, 32, 6)), look: HOME.look.clone() } : batteryView(to.world);
+    camera.position.copy(start.eye);
+    controls.target.copy(start.look);
+    controls.update();
+  }
+  // Compile any new shaders now, not on the first visible frame.
+  renderer.compile(to.scene, camera);
+
+  // Down: fade out while dropping in. Up: shrink into the box, then pull back.
+  if (down) {
+    const reveal = wipe.reveal({ to: null });
+    if (!walking) flyTo(HOME.eye.clone(), HOME.look.clone(), { duration: 1.6 });
+    await reveal;
+  } else {
+    await wipe.reveal({ to: walking ? center : batteryOnScreen(to.world) });
+    if (!walking) flyTo(HOME.eye.clone(), HOME.look.clone(), { duration: 1.3 });
+  }
+}
+
+/** The universe you're in emptied out: everyone fits upstairs again. */
+function collapse() {
+  if (collapsing) return;
+  collapsing = true;
+  hud.toast(`🔋 The ${here().verse.name} emptied out: everyone fits upstairs now.`);
+  const retry = () => {
+    if (here().level < multiverse.needed) {
+      collapsing = false;
+      return;
+    }
+    if (traveling) {
+      setTimeout(retry, 400);
+      return;
+    }
+    travelTo(multiverse.needed - 1).finally(() => { collapsing = false; });
+  };
+  setTimeout(retry, 1500);
+}
+
 // Picking -----------------------------------------------------------------------
 const raycaster = new THREE.Raycaster();
 raycaster.layers.enableAll();
@@ -317,6 +523,7 @@ let downAt = null;
 function pick(ndc, maxDistance = Infinity) {
   raycaster.setFromCamera(ndc, camera);
   raycaster.far = maxDistance;
+  const { scene, world, manager } = here();
   for (const hit of raycaster.intersectObjects(scene.children, true)) {
     // Raycasts ignore visibility: skip what isn't on screen (the walk-mode
     // ceiling and walls while in the overview).
@@ -330,6 +537,16 @@ function pick(ndc, maxDistance = Infinity) {
       const agent = world.desks[d.deskIndex].agent;
       return agent ? { agent } : null;
     }
+    if (d.gate || d.gateHint) {
+      // The box is the universe (who's in there); the remote takes you in.
+      const level = world.level + 1;
+      const name = verse(level).name;
+      const n = world.battery.count;
+      const open = world.battery.open;
+      if (d.gate) return { gate: true, action: { id: 'gate', kind: 'gate', level, label: `${name} remote · ${open ? 'ready' : 'off'}` } };
+      return { action: { id: 'gate-hint', kind: 'hint', level, label: `${name} · ${open ? `${n} agent${n === 1 ? '' : 's'}` : 'empty'}` } };
+    }
+    if (d.car) return { car: true, action: { id: 'car', kind: 'hood', label: 'Car' } };
     if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
     if (hit.object.isMesh && !hit.object.material.transparent) return null;
   }
@@ -348,10 +565,11 @@ function setPointed(target) {
     agent?.setHighlight(true);
     hovered = agent;
   }
-  for (const face of BOARDS) {
+  for (const face of boardFaces()) {
     const board = face.userData.board;
     board.setHover(target?.board === board ? target.action?.id : '');
   }
+  here().world.battery.setHover(!!target?.gate);
 }
 
 function toNdc(event) {
@@ -368,7 +586,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     // A board's items only react once you've flown up to it.
     if (target?.board && target.board !== focusedBoard) target.action = null;
     setPointed(target);
-    document.body.classList.toggle('hovering', !!(target?.agent || target?.board));
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car));
     pendingMove = null;
   });
   pendingMove = e;
@@ -395,7 +613,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey) return;
   if (e.key === 'Escape') {
-    if (view === 'orbit') closePanel();
+    // With nothing open, Esc climbs back out of the battery.
+    if (view === 'orbit' && !hud.panelOpen && !focusedBoard && here().level > 0) travelTo(Math.min(here().level, multiverse.needed) - 1);
+    else if (view === 'orbit') closePanel();
     else if (hud.panelOpen) { focused = null; hud.hidePanel(); syncWalkHud(); }
   }
   if (e.code === 'KeyF' && view === 'orbit') enterWalk();
@@ -448,8 +668,7 @@ renderer.setAnimationLoop((timestamp) => {
     camera.updateProjectionMatrix();
   }
 
-  world.update(dt, t, now);
-  manager.tick(dt, t, now, camera);
+  multiverse.tick(dt, t, now, camera);
 
   // Whatever the crosshair is on, within arm's reach of a few metres.
   if (view === 'walk' && walker.locked && !flight && ++aimFrame % 3 === 0) {
@@ -463,24 +682,31 @@ renderer.setAnimationLoop((timestamp) => {
   }
 
   if (focused && focused.phase === 'gone') {
-    hud.toast('✨ That agent finished and vanished.');
+    // Gone from this office doesn't mean done: it may have changed universe.
+    const record = multiverse.find(focused.id);
+    hud.toast(record ? `🔋 That agent moved to the ${verse(record.level).name}.` : '✨ That agent finished and vanished.');
     unfocus();
   }
 
   slowTimer -= dt;
   if (slowTimer <= 0) {
     slowTimer = 0.5;
-    const agents = manager.list();
-    world.room.dashboard.draw(agents, now, { offline: feed.state === 'offline', today: today.data });
-    world.room.whiteboard.draw(today.data, agents, now);
+    const agents = multiverse.roster(now);
+    dashboard.draw(agents, now, { offline: feed.state === 'offline', today: today.data });
+    whiteboard.draw(today.data, agents, now);
     hud.update(agents, feed.state, now, today.data);
   }
 
   ink.render();
-  labels.render(scene, camera);
+  labels.render(here().scene, camera);
 });
 
 // Handy for poking at things from the console while developing.
 if (import.meta.env.DEV) {
-  Object.assign(window, { meeseeks: { scene, camera, controls, world, manager, feed, today, ink, walker, enterWalk, exitWalk, focusBoard, act, pick } });
+  window.meeseeks = {
+    camera, controls, multiverse, dashboard, whiteboard, feed, today, ink, walker, enterWalk, exitWalk, focusBoard, act, pick, travelTo,
+    get scene() { return here().scene; },
+    get world() { return here().world; },
+    get manager() { return here().manager; },
+  };
 }

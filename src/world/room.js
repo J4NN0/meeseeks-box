@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { PALETTE, box, cyl, glow, mesh, noInk, rng, sphere, toon } from '../engine/toon.js';
 import { createPortal } from './portal.js';
+import { CAR, HULL, HULL_Y, carColliders, hullGeometry } from './car.js';
 import { glowTexture, labelTexture, neonSignTexture } from './screens.js';
-import { MissionControl } from './mission-control.js';
-import { RecapBoard } from './recap-board.js';
 
 // Rick's garage, now a seed-stage startup. A cut-away diorama: floor, back
-// wall and left wall; the open sides face the camera.
+// wall and left wall; the open sides face the camera. The universes in the
+// car battery reuse it with their own `theme` (verses.js); the wall boards
+// are shared, so every copy shows the same TV and whiteboard.
 
 export const ROOM = { minX: -8, maxX: 8, minZ: -6, maxZ: 6, height: 3.6 };
 
@@ -14,7 +15,7 @@ export const ROOM = { minX: -8, maxX: 8, minZ: -6, maxZ: 6, height: 3.6 };
 export const WALK_BOUNDS = { minX: -7.95, maxX: 7.95, minZ: -5.95, maxZ: 5.95 };
 export const PORTAL = { x: -7.93, y: 1.55, z: 0.25, radius: 1.05 };
 
-export function buildRoom(scene) {
+export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   const room = new THREE.Group();
   scene.add(room);
   const updaters = [];
@@ -29,15 +30,15 @@ export function buildRoom(scene) {
   room.add(slab);
   room.add(box(16.9, 0.18, 12.9, '#5c6158', 0, -0.59, 0));
 
-  const back = box(16.6, ROOM.height, 0.3, PALETTE.wall, 0, ROOM.height / 2, -6.15);
-  const left = box(0.3, ROOM.height, 12.6, PALETTE.wall, -8.15, ROOM.height / 2, 0);
+  const back = box(16.6, ROOM.height, 0.3, theme.wall, 0, ROOM.height / 2, -6.15);
+  const left = box(0.3, ROOM.height, 12.6, theme.wall, -8.15, ROOM.height / 2, 0);
   room.add(back, left);
-  room.add(box(16.3, 1.05, 0.03, PALETTE.wallDark, 0.15, 0.525, -5.99, { cast: false }));
-  room.add(box(0.03, 1.05, 12.3, PALETTE.wallDark, -7.99, 0.525, 0.15, { cast: false }));
-  room.add(box(16.3, 0.05, 0.05, PALETTE.wallTrim, 0.15, 1.05, -5.98, { cast: false }));
-  room.add(box(0.05, 0.05, 12.3, PALETTE.wallTrim, -7.98, 1.05, 0.15, { cast: false }));
-  room.add(box(16.3, 0.12, 0.06, PALETTE.wallTrim, 0.15, 0.06, -5.97, { cast: false }));
-  room.add(box(0.06, 0.12, 12.3, PALETTE.wallTrim, -7.97, 0.06, 0.15, { cast: false }));
+  room.add(box(16.3, 1.05, 0.03, theme.wallDark, 0.15, 0.525, -5.99, { cast: false }));
+  room.add(box(0.03, 1.05, 12.3, theme.wallDark, -7.99, 0.525, 0.15, { cast: false }));
+  room.add(box(16.3, 0.05, 0.05, theme.wallTrim, 0.15, 1.05, -5.98, { cast: false }));
+  room.add(box(0.05, 0.05, 12.3, theme.wallTrim, -7.98, 1.05, 0.15, { cast: false }));
+  room.add(box(16.3, 0.12, 0.06, theme.wallTrim, 0.15, 0.06, -5.97, { cast: false }));
+  room.add(box(0.06, 0.12, 12.3, theme.wallTrim, -7.97, 0.06, 0.15, { cast: false }));
 
   // Oil stains, because it is still a garage.
   const stains = [[5.2, -2.6, 0.55], [6.8, -3.4, 0.35], [-6.2, -2.2, 0.3], [2.4, 4.6, 0.25], [-2.8, 2.9, 0.2]];
@@ -49,12 +50,11 @@ export function buildRoom(scene) {
     room.add(s);
   }
 
-  room.add(garageDoor(4.7, -5.98));
-  room.add(spaceCruiser(6.2, -4.05, -0.32));
-  solidBox(6.05, -4.0, 3.8, 2.0);
+  room.add(garageDoor(4.7, -5.98, theme));
+  room.add(spaceCruiser(CAR.x, CAR.z, CAR.rot));
+  colliders.push(...carColliders());
 
   // Back wall: TV dashboard, neon sign, whiteboard, coffee bar ------------
-  const dashboard = new MissionControl();
   const tv = new THREE.Group();
   tv.position.set(-1.4, 2.2, -5.95);
   tv.add(box(3.25, 1.88, 0.08, '#1e2126', 0, 0, 0));
@@ -67,7 +67,6 @@ export function buildRoom(scene) {
   tvLight.position.set(-1.4, 2.0, -5.0);
   room.add(tvLight);
 
-  const whiteboard = new RecapBoard();
   const wb = new THREE.Group();
   wb.position.set(-5.6, 1.42, -5.96);
   wb.add(box(2.8, 1.6, 0.05, '#b4bac2', 0, 0, 0));
@@ -87,11 +86,11 @@ export function buildRoom(scene) {
   const neon = new THREE.Group();
   neon.position.set(-5.6, 2.88, -5.96);
   neon.add(box(2.95, 0.86, 0.04, '#24262f', 0, 0, 0));
-  const neonFace = new THREE.Mesh(new THREE.PlaneGeometry(2.85, 0.84), new THREE.MeshBasicMaterial({ map: neonSignTexture(), transparent: true, depthWrite: false, toneMapped: false }));
+  const neonFace = new THREE.Mesh(new THREE.PlaneGeometry(2.85, 0.84), new THREE.MeshBasicMaterial({ map: neonSignTexture(theme.sign), transparent: true, depthWrite: false, toneMapped: false }));
   neonFace.position.z = 0.03;
   neon.add(noInk(neonFace));
   room.add(neon);
-  const neonLight = new THREE.PointLight('#ff5fa2', 2.3, 4.5, 1.8);
+  const neonLight = new THREE.PointLight(theme.neon, 2.3, 4.5, 1.8);
   neonLight.position.set(-5.6, 2.6, -5.2);
   room.add(neonLight);
 
@@ -137,12 +136,12 @@ export function buildRoom(scene) {
 
   // The diorama is open on two sides for the overview. When you walk in, the
   // missing walls and a ceiling close it up; the windows look out into space.
-  const enclosure = buildEnclosure();
+  const enclosure = buildEnclosure(theme);
   enclosure.visible = false;
   room.add(enclosure);
 
   // Lights ------------------------------------------------------------------
-  scene.add(new THREE.HemisphereLight('#fff8ea', '#7b806f', 1.7));
+  scene.add(new THREE.HemisphereLight(theme.sky, '#7b806f', 1.7));
   const sun = new THREE.DirectionalLight('#fff1d6', 2.1);
   sun.position.set(7, 13, 9);
   sun.castShadow = true;
@@ -170,7 +169,7 @@ export function buildRoom(scene) {
 
 // ------------------------------------------------------------------ props
 
-function buildEnclosure() {
+function buildEnclosure(theme) {
   const g = new THREE.Group();
   const H = ROOM.height;
   const noShadow = { cast: false, receive: true };
@@ -186,20 +185,20 @@ function buildEnclosure() {
     ];
     for (let i = 0; i <= windows; i++) parts.push([i * (pillar + winW), pillar, 0.95, 2.45]);
     for (const [start, len, y0, y1] of parts) {
-      const w = box(len, y1 - y0, 0.3, PALETTE.wall, 0, 0, 0, noShadow);
+      const w = box(len, y1 - y0, 0.3, theme.wall, 0, 0, 0, noShadow);
       place(w, -length / 2 + start + len / 2, (y0 + y1) / 2);
       g.add(w);
     }
     // Chunky frames and a sill on each window.
     for (let i = 0; i < windows; i++) {
       const cx = -length / 2 + pillar + i * (pillar + winW) + winW / 2;
-      const sill = box(winW + 0.2, 0.08, 0.42, PALETTE.wallTrim, 0, 0, 0, noShadow);
+      const sill = box(winW + 0.2, 0.08, 0.42, theme.wallTrim, 0, 0, 0, noShadow);
       place(sill, cx, 0.97);
       g.add(sill);
-      const mullion = box(0.07, 1.5, 0.12, PALETTE.wallTrim, 0, 0, 0, noShadow);
+      const mullion = box(0.07, 1.5, 0.12, theme.wallTrim, 0, 0, 0, noShadow);
       place(mullion, cx, 1.7);
       g.add(mullion);
-      const transom = box(winW, 0.07, 0.12, PALETTE.wallTrim, 0, 0, 0, noShadow);
+      const transom = box(winW, 0.07, 0.12, theme.wallTrim, 0, 0, 0, noShadow);
       place(transom, cx, 1.95);
       g.add(transom);
     }
@@ -226,12 +225,12 @@ function buildEnclosure() {
   return g;
 }
 
-function garageDoor(x, z) {
+function garageDoor(x, z, theme) {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
-  g.add(box(0.16, 3.12, 0.14, PALETTE.wallTrim, -2.18, 1.56, 0.02));
-  g.add(box(0.16, 3.12, 0.14, PALETTE.wallTrim, 2.18, 1.56, 0.02));
-  g.add(box(4.52, 0.2, 0.14, PALETTE.wallTrim, 0, 3.1, 0.02));
+  g.add(box(0.16, 3.12, 0.14, theme.wallTrim, -2.18, 1.56, 0.02));
+  g.add(box(0.16, 3.12, 0.14, theme.wallTrim, 2.18, 1.56, 0.02));
+  g.add(box(4.52, 0.2, 0.14, theme.wallTrim, 0, 3.1, 0.02));
   for (let i = 0; i < 6; i++) {
     g.add(box(4.2, 0.47, 0.06, PALETTE.cream, 0, 0.26 + i * 0.5, 0.04));
     if (i === 4) {
@@ -248,9 +247,10 @@ function spaceCruiser(x, z, rot) {
   g.position.set(x, 0, z);
   g.rotation.y = rot;
   const hullMat = toon('#aeb6be');
-  const hull = mesh(new THREE.SphereGeometry(1, 36, 20), hullMat);
-  hull.scale.set(1.55, 0.36, 0.86);
-  hull.position.y = 0.72;
+  // With an opening over the engine: the hood and the bay are in battery.js.
+  const hull = mesh(hullGeometry(), hullMat);
+  hull.scale.copy(HULL);
+  hull.position.y = HULL_Y;
   g.add(hull);
   const skirt = mesh(new THREE.CylinderGeometry(1.0, 0.9, 0.18, 36), toon('#8b939c'));
   skirt.scale.set(1.5, 1, 0.82);
@@ -286,6 +286,8 @@ function spaceCruiser(x, z, rot) {
   }
   // Junk on the roof: it is Rick's car.
   g.add(box(0.35, 0.18, 0.3, '#c9a36b', -0.9, 1.19, -0.2).rotateY(0.3));
+  // Clicking the car pops its hood (battery.js).
+  g.traverse((o) => { if (o.isMesh) o.userData.car = true; });
   return g;
 }
 

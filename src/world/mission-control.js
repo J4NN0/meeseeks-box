@@ -60,14 +60,14 @@ export class MissionControl extends Board {
   }
 
   draw(agents, now, { offline = false, today = null } = {}) {
-    const live = agents.filter((a) => a.visualStatus !== 'leaving' && a.phase !== 'gone');
+    const live = agents.filter((a) => a.visualStatus !== 'leaving');
     const bySince = (a, b) => a.session.statusSince - b.session.statusSince;
     const waiting = live.filter((a) => a.visualStatus === 'waiting').sort(bySince);
     const napping = live.filter((a) => a.visualStatus === 'sleeping').sort(bySince);
     const working = live.filter((a) => a.visualStatus === 'working' || a.visualStatus === 'stressed');
     const key = [
       Math.floor(now / 1000), offline, today?.now, this.provider,
-      waiting.map((a) => `${a.id}:${a.session.lastMessage?.ts}:${a.session.ask?.text}`).join(','),
+      waiting.map((a) => `${a.id}:${a.session.lastMessage?.ts}:${a.session.ask?.text}:${a.where || ''}`).join(','),
       napping.map((a) => a.id).join(','),
       working.map((a) => `${a.id}:${a.session.turnStartedAt}`).join(','),
     ].join('|');
@@ -167,7 +167,7 @@ export class MissionControl extends Board {
   card(a, x, y, w, h, now) {
     const { ctx } = this;
     const s = a.session;
-    const action = { id: `agent:${a.id}`, kind: 'agent', agentId: a.id, label: `${s.project} · waiting on you` };
+    const action = { id: `agent:${a.id}`, kind: 'agent', agentId: a.id, label: `${s.project} · waiting on you${a.where ? ` in the ${a.where}` : ''}` };
     const hot = this.isHovered(action);
     ctx.fillStyle = hot ? 'rgba(255, 210, 74, 0.16)' : 'rgba(255, 255, 255, 0.06)';
     roundRect(ctx, x, y, w, h, 18);
@@ -196,7 +196,8 @@ export class MissionControl extends Board {
     const pw = ctx.measureText(project).width;
     ctx.fillStyle = MUTED;
     ctx.font = `600 26px ${ROUND}`;
-    ctx.fillText(fit(ctx, s.title, w - pw - waitW - 120), x + 36 + pw + 18, y + 50);
+    // Agents in the car battery say which universe to go to.
+    ctx.fillText(fit(ctx, a.where ? `🔋 ${a.where} · ${s.title}` : s.title, w - pw - waitW - 120), x + 36 + pw + 18, y + 50);
 
     const { icon, text } = inboxLine(s);
     ctx.fillStyle = '#dfe7f1';
@@ -219,7 +220,7 @@ export class MissionControl extends Board {
     ctx.font = `800 24px ${ROUND}`;
     for (const p of PROVIDERS) {
       const pw = ctx.measureText(p.label).width + 40;
-      const action = { id: `limits:${p.id}`, kind: 'limits', provider: p.id, label: `Show ${p.name} limits and tokens` };
+      const action = { id: `limits:${p.id}`, kind: 'limits', provider: p.id, label: `${p.name} limits` };
       const on = this.provider === p.id;
       ctx.fillStyle = on ? p.color : this.isHovered(action) ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)';
       roundRect(ctx, px, y + 16, pw, 42, 21);
