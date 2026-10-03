@@ -19,6 +19,107 @@ export function joint(parent, x = 0, y = 0, z = 0) {
   return g;
 }
 
+// Writing at a meeting table -----------------------------------------------------
+
+/**
+ * The page of a pad, in its own terms: `across` runs from the margin to the
+ * right-hand edge, `down` from the top line (by the binding, away from the
+ * writer) to the bottom one, in metres from the pad's middle.
+ */
+const PAGE = { left: -0.045, right: 0.065, top: -0.07, bottom: 0.08, lines: 5 };
+/** Seconds to write a line at rate 1. */
+const LINE_S = 2.6;
+/** The way a pen points from the hand holding it to its tip, in the writer's frame (for the -x hand): down onto the paper, tipped away and in. */
+export const PEN_DIR = new THREE.Vector3(0.22, -0.86, 0.46).normalize();
+const DOWN = new THREE.Vector3(0, -1, 0);
+
+/**
+ * Where the tip of the pen goes on the pad, in the writer's frame, after
+ * `written` seconds of writing: along each line from the margin, a line at
+ * a time from the top, lifting between words and back to the margin for the
+ * next line. `tap`, a clock, taps it up and down where it is instead, and
+ * `span` shrinks the page to what a short arm can reach. `table` is the one
+ * setTable gets: the pad's middle (`pad`, on the paper) and its turn.
+ */
+export function penTip(table, written, { tap = null, span = 1 }, out) {
+  const t = written / LINE_S;
+  const n = Math.floor(t);
+  const k = t - n;
+  const lineDown = (i) => PAGE.top + ((i % PAGE.lines) / (PAGE.lines - 1)) * (PAGE.bottom - PAGE.top);
+  let across;
+  let down;
+  let lift;
+  if (k > 0.86) {
+    // End of the line: pen up and back to the margin, one line down.
+    const r = (k - 0.86) / 0.14;
+    across = 1 - r;
+    down = THREE.MathUtils.lerp(lineDown(n), lineDown(n + 1), r);
+    lift = Math.sin(r * Math.PI) * 0.02 + 0.004;
+  } else {
+    const w = written * 14;
+    across = k / 0.86 + Math.sin(w) * 0.04;
+    down = lineDown(n) + Math.cos(w) * 0.004;
+    // Off the paper for a moment between words.
+    lift = Math.max(0, Math.sin(written * 2.2) - 0.82) * 0.06;
+  }
+  if (tap !== null) lift = Math.max(lift, Math.sin(tap * 4.5) * 0.03);
+  const mid = (PAGE.left + PAGE.right) / 2;
+  const x = (mid + (across - 0.5) * (PAGE.right - PAGE.left)) * span;
+  const z = down * span;
+  // Page to writer: the pad's own little turn, then round to face the writer.
+  const c = Math.cos(table.padTurn || 0);
+  const sn = Math.sin(table.padTurn || 0);
+  const { pad } = table;
+  return out.set(pad.x - (x * c + z * sn), pad.y + 0.001 + lift, pad.z - (-x * sn + z * c));
+}
+
+const _aim = new THREE.Quaternion();
+const _inv = new THREE.Quaternion();
+
+/**
+ * The rotation for a joint (a hand, a claw) whose parent chain turns by
+ * `chain`, so that its -y points along `dir`: the way a pen held in it
+ * points. A quaternion, for the Poser's turn().
+ */
+export function pointing(chain, dir) {
+  _aim.setFromUnitVectors(DOWN, dir);
+  return _inv.copy(chain).invert().multiply(_aim);
+}
+
+const _bd = new THREE.Vector3();
+const _bn = new THREE.Vector3();
+
+/**
+ * Two bones from `from` towards `to`, `a` and `b` long: where the joint
+ * between them goes, bent towards `pole`.
+ */
+export function bendPoint(from, to, a, b, pole, out) {
+  const d = _bd.copy(to).sub(from);
+  const len = THREE.MathUtils.clamp(d.length(), Math.abs(a - b) + 1e-4, a + b - 1e-4);
+  d.normalize();
+  const n = _bn.copy(pole).addScaledVector(d, -pole.dot(d)).normalize();
+  const cosA = (a * a + len * len - b * b) / (2 * a * len);
+  return out.copy(from).addScaledVector(d, a * cosA).addScaledVector(n, a * Math.sqrt(1 - cosA * cosA));
+}
+
+/**
+ * A ballpoint pen, held in a hand that's a joint at the end of a limb: it
+ * runs on along the limb (its -y), the tip `reach` past the joint. Hidden
+ * until it sits down at a meeting table.
+ */
+export function heldPen(material, tipMaterial, reach = 0.11) {
+  const g = new THREE.Group();
+  const barrel = mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 8), material);
+  barrel.position.y = -reach + 0.075;
+  g.add(barrel);
+  const tip = mesh(new THREE.ConeGeometry(0.008, 0.016, 8), tipMaterial);
+  tip.rotation.x = Math.PI;
+  tip.position.y = -reach + 0.008;
+  g.add(tip);
+  g.visible = false;
+  return g;
+}
+
 const _d = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _x = new THREE.Vector3();
@@ -55,10 +156,23 @@ export function solveArm(target, pole, upper, lower) {
 export class Poser {
   constructor() {
     this.targets = new Map();
+    this.turns = new Map();
   }
 
   rot(obj, x = 0, y = 0, z = 0) {
     this.targets.set(obj, { x, y, z, pos: this.targets.get(obj)?.pos });
+    return this;
+  }
+
+  /**
+   * Turns `obj` towards a rotation given as a quaternion, easing along the
+   * shortest way round: for joints aimed at something (a pen at the paper),
+   * where easing each Euler angle on its own could swing them right round.
+   */
+  turn(obj, q) {
+    let to = this.turns.get(obj);
+    if (!to) this.turns.set(obj, (to = new THREE.Quaternion()));
+    this.targets.set(obj, { q: to.copy(q), pos: this.targets.get(obj)?.pos });
     return this;
   }
 
@@ -71,9 +185,13 @@ export class Poser {
 
   apply(dt, speed = 10) {
     for (const [obj, t] of this.targets) {
-      obj.rotation.x = damp(obj.rotation.x, t.x, speed, dt);
-      obj.rotation.y = damp(obj.rotation.y, t.y, speed, dt);
-      obj.rotation.z = damp(obj.rotation.z, t.z, speed, dt);
+      if (t.q) {
+        obj.quaternion.slerp(t.q, 1 - Math.exp(-speed * dt));
+      } else {
+        obj.rotation.x = damp(obj.rotation.x, t.x, speed, dt);
+        obj.rotation.y = damp(obj.rotation.y, t.y, speed, dt);
+        obj.rotation.z = damp(obj.rotation.z, t.z, speed, dt);
+      }
       if (t.pos) {
         obj.position.x = damp(obj.position.x, t.pos.x, speed, dt);
         obj.position.y = damp(obj.position.y, t.pos.y, speed, dt);
@@ -90,6 +208,8 @@ export class Poser {
 // doing: walking, typing, napping, waving.
 
 const _hit = new THREE.Vector3();
+const _cup = new THREE.Vector3();
+const _rootQ = new THREE.Quaternion();
 const _r = new THREE.Vector3();
 const _tilt = new THREE.Vector3();
 const _kick = new THREE.Vector3();
@@ -129,6 +249,42 @@ export class CharacterBase {
     this.squash = new Wobble(18, 0.35);
     this.spin = 0;
     this.spinTarget = 0;
+
+    // At a meeting table (`setTable`): where its notepad and mug are, in its
+    // own frame. It takes notes with `pen` and drinks with `cupHand`: `sip`
+    // is how far the mug is lifted, 0 (on the table) to 1 (at its mouth),
+    // and `cupOffset` where the mug's middle is from that hand.
+    this.table = null;
+    this.pen = null;
+    // Where it wants its pad, if its arms don't reach the usual spot ({ x, z }, its own frame).
+    this.padSpot = null;
+    this.sip = 0;
+    // Seconds of notes it's written on the pad: where its pen is on the page.
+    this.written = 0;
+    this.cupHand = null;
+    this.cupOffset = new THREE.Vector3();
+  }
+
+  /** Sat down at a meeting table (its `{ pad, cup }`), or back at a desk (null). */
+  setTable(table) {
+    this.table = table;
+    this.sip = 0;
+    if (this.pen) this.pen.visible = !!table;
+  }
+
+  /**
+   * Where the tip of its pen goes this frame (penTip): writing on at `rate`
+   * (0 holds it where it is), or tapping on the spot with `tap`.
+   */
+  penAt(dt, time, { rate = 1, tap = false, span = 1 }, out) {
+    if (!tap) this.written += dt * rate;
+    return penTip(this.table, this.written, { tap: tap ? time : null, span }, out);
+  }
+
+  /** Where the mug it's drinking from is, in world space: in its hand. */
+  cupWorld(out) {
+    this.cupHand.getWorldPosition(out);
+    return out.add(_cup.copy(this.cupOffset).applyQuaternion(this.root.getWorldQuaternion(_rootQ)));
   }
 
   /** Seconds since the last slap landed, while it's still showing. */

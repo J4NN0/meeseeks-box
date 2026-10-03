@@ -10,7 +10,7 @@ const DESK_H = 0.74;
 const CHAIR_Z = 0.66;
 const KEYBOARD_Z = 0.14;
 const KEY_TOP = DESK_H + 0.054;
-const CHAIR_COLORS = ['#2f3640', '#e17055', '#00a8a8', '#6c5ce7', '#fdcb6e', '#2d3436'];
+export const CHAIR_COLORS = ['#2f3640', '#e17055', '#00a8a8', '#6c5ce7', '#fdcb6e', '#2d3436'];
 const TOP_COLORS = ['#efe9dc', '#c89560', '#efe9dc', '#d7c29a'];
 
 export class Desk {
@@ -65,32 +65,15 @@ export class Desk {
     this.beacon = beacon;
 
     // Swivel chair. The seat anchor is where a sitting agent is parented.
-    const chair = new THREE.Group();
+    const { chair, swivel, seat } = officeChair(CHAIR_COLORS[Math.floor(r() * CHAIR_COLORS.length)]);
     chair.position.set(0, 0, CHAIR_Z);
     root.add(chair);
-    const chairColor = CHAIR_COLORS[Math.floor(r() * CHAIR_COLORS.length)];
-    for (let i = 0; i < 5; i++) {
-      const leg = box(0.3, 0.035, 0.05, '#2b2e33', 0, 0.06, 0);
-      leg.geometry.translate(0.15, 0, 0);
-      leg.rotation.y = (i / 5) * Math.PI * 2;
-      chair.add(leg);
-      const wheel = sphere(0.035, '#1f2226', 8);
-      wheel.position.set(Math.cos((i / 5) * Math.PI * 2) * 0.29, 0.035, -Math.sin((i / 5) * Math.PI * 2) * 0.29);
-      chair.add(wheel);
-    }
-    chair.add(cyl(0.03, 0.03, 0.34, '#555c66', 10).translateY(0.24));
-    const swivel = new THREE.Group();
-    swivel.position.y = 0;
-    chair.add(swivel);
-    swivel.add(box(0.52, 0.08, 0.5, chairColor, 0, 0.43, 0));
-    swivel.add(box(0.5, 0.56, 0.07, chairColor, 0, 0.8, 0.25));
-    swivel.add(box(0.05, 0.3, 0.05, '#2b2e33', 0, 0.55, 0.27));
     this.swivel = swivel;
-    this.seat = new THREE.Group();
-    this.seat.rotation.y = Math.PI; // agents face the monitor (-z)
-    swivel.add(this.seat);
+    this.seat = seat;
     this.chair = chair;
     this.swivelTarget = 0;
+    // Which way an agent turns (its back to the chair) before sitting down.
+    this.backYaw = 0;
     this.status = null;
     root.traverse((o) => { if (o.isMesh) o.userData.deskIndex = index; });
   }
@@ -173,6 +156,33 @@ export class Desk {
     else this.beacon.scale.setScalar(1);
     if (!this.agent) this.screen.drawIdle(t + this.index * 7);
   }
+}
+
+/**
+ * A swivel chair on five wheels: whoever sits in it is parented to `seat`
+ * and faces the chair's -z; `swivel` turns the seat and back.
+ */
+export function officeChair(color) {
+  const chair = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const leg = box(0.3, 0.035, 0.05, '#2b2e33', 0, 0.06, 0);
+    leg.geometry.translate(0.15, 0, 0);
+    leg.rotation.y = (i / 5) * Math.PI * 2;
+    chair.add(leg);
+    const wheel = sphere(0.035, '#1f2226', 8);
+    wheel.position.set(Math.cos((i / 5) * Math.PI * 2) * 0.29, 0.035, -Math.sin((i / 5) * Math.PI * 2) * 0.29);
+    chair.add(wheel);
+  }
+  chair.add(cyl(0.03, 0.03, 0.34, '#555c66', 10).translateY(0.24));
+  const swivel = new THREE.Group();
+  chair.add(swivel);
+  swivel.add(box(0.52, 0.08, 0.5, color, 0, 0.43, 0));
+  swivel.add(box(0.5, 0.56, 0.07, color, 0, 0.8, 0.25));
+  swivel.add(box(0.05, 0.3, 0.05, '#2b2e33', 0, 0.55, 0.27));
+  const seat = new THREE.Group();
+  seat.rotation.y = Math.PI;
+  swivel.add(seat);
+  return { chair, swivel, seat };
 }
 
 export { DESK_H, CHAIR_Z, KEYBOARD_Z, KEY_TOP };

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildShell } from './shell.js';
-import { buildSpareRoom } from './spare-room.js';
+import { buildMeetingRoom } from './meeting-room.js';
+import { buildMeeting } from './meeting.js';
 import { createArmchair, createCouch } from './couch.js';
 import { CONSOLE, createTv } from './tv.js';
 import { createRemote } from './remote.js';
@@ -8,16 +9,16 @@ import {
   COFFEE_TABLE, createBookshelf, createCoffeeTable, createDresser, createEndTable, createFlowers, createLamp, createMirror, createRug,
   flowerPicture, greenPainting, littlePicture,
 } from './decor.js';
-import { DOOR, LIVING_ROOM, T } from './plan.js';
+import { ARCH, DOOR, LIVING_ROOM, T } from './plan.js';
 
-export { LIVING_ROOM } from './plan.js';
+export { DOOR, LIVING_ROOM, MEETING_ROOM } from './plan.js';
 
 // The Smiths' living room from Rick and Morty, through a door in the
 // garage's right wall: the mint couch facing the TV, Rick's
 // interdimensional cable box beside it, the remote on the coffee table.
-// Through the arch behind the couch, an empty spare room (spare-room.js).
-// Each piece is built in its own file (the TV and the remote are live);
-// where it stands is only its line below.
+// Through the arch behind the couch, the meeting room (meeting-room.js, and
+// what's in it in meeting.js). Each piece is built in its own file (the TV
+// and the remote are live); where it stands is only its line below.
 
 /**
  * On the floor, in room coordinates: `at` [x, z], `turn` about y (0 faces
@@ -32,7 +33,7 @@ const FLOOR = [
   { name: 'Armchair', make: createArmchair, at: [10.55, -3.33], turn: 2.0, solid: 0.5 },
   // Behind the couch, in the corner by the sliding door.
   { name: 'Bookshelf', make: createBookshelf, at: [14.0, 0.415], turn: Math.PI, solid: [1.55, 0.35] },
-  // On the same wall, past the arch to the spare room.
+  // On the same wall, past the arch to the meeting room.
   { name: 'Dresser', make: () => createDresser(createFlowers()), at: [10.47, 0.365], turn: Math.PI, solid: [1.0, 0.45] },
 ];
 
@@ -52,19 +53,25 @@ const TV_AT = [12.5, -5.75];
 const REMOTE_AT = { at: [12.78, -3.78], turn: 0.5 };
 /** How close you get before the door opens for you. */
 const DOOR_REACH = 2.2;
+/**
+ * The way agents walk through to the meeting room, from the garage side of
+ * the door: in, along behind the couch, and through the arch.
+ */
+const WAY_THROUGH = [[LIVING_ROOM.minX - 0.55, DOOR.z], [LIVING_ROOM.minX + 0.6, DOOR.z], [ARCH.x, DOOR.z]];
 
 /**
  * Builds the room. Add `group` to the room and `walls` to what goes up when
- * you walk in. `update(dt, t, walker)` takes where you stand when walking
- * (null in the overview), to open the door for you.
+ * you walk in. `update(dt, t, eye, walking)` takes where you're looking
+ * from, and whether you're walking (when the door opens for you).
  */
 export function buildLivingRoom({ theme, height }) {
   const shell = buildShell({ theme, height });
-  const spare = buildSpareRoom({ theme, height });
+  const room = buildMeetingRoom({ theme, height });
+  const meeting = buildMeeting();
   const { group, walls } = shell;
-  group.add(spare.group);
-  walls.add(spare.walls);
-  const colliders = [...shell.colliders, ...spare.colliders];
+  group.add(room.group, meeting.group);
+  walls.add(room.walls);
+  const colliders = [...shell.colliders, ...room.colliders, ...meeting.colliders];
 
   for (const { make, at: [x, z], turn = 0, solid } of FLOOR) {
     const piece = make();
@@ -105,10 +112,14 @@ export function buildLivingRoom({ theme, height }) {
 
   const doorX = LIVING_ROOM.minX - T / 2;
   let open = 0;
+  let held = false;
   return {
     group,
     walls,
     colliders,
+    meeting,
+    /** From the garage side of the door to where it meets the walk round the meeting table. */
+    way: [...WAY_THROUGH.map(([x, z]) => new THREE.Vector3(x, 0, z)), meeting.door.clone()],
     /** From behind the couch, looking at the TV. */
     view: { eye: new THREE.Vector3(TV_AT[0], 2.05, 0.4), look: new THREE.Vector3(TV_AT[0], 0.95, TV_AT[1]) },
     get channel() { return tv.channel; },
@@ -116,11 +127,17 @@ export function buildLivingRoom({ theme, height }) {
       remote.press();
       tv.next();
     },
-    update(dt, t, walker) {
+    /** Someone's walking through: the door opens for them too (for this frame). */
+    holdDoor() {
+      held = true;
+    },
+    update(dt, t, eye, walking) {
       tv.update(dt, t);
       remote.update(dt);
-      const near = walker && Math.hypot(walker.x - doorX, walker.z - DOOR.z) < DOOR_REACH;
-      open = THREE.MathUtils.damp(open, near ? 1 : 0, 6, dt);
+      meeting.update(dt, t, eye);
+      const near = walking && eye && Math.hypot(eye.x - doorX, eye.z - DOOR.z) < DOOR_REACH;
+      open = THREE.MathUtils.damp(open, near || held ? 1 : 0, 6, dt);
+      held = false;
       shell.swing(open);
     },
   };

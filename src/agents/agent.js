@@ -1,11 +1,19 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { createMascot, mascotKind, agentColor } from '../characters/index.js';
+import { dampAngle, elasticOut } from '../engine/motion.js';
 import { STATUS_COLORS, STATUS_LABELS, STATUS_SITUATIONS, formatDuration, providerInfo, statusSince, visualStatus } from '../status.js';
 import { line } from './lines.js';
 
 const { damp } = THREE.MathUtils;
 const WALK_SPEED = 1.7;
+/** Walking to and from a meeting, it's a brisk walk: it's a long way round. */
+const MEETING_SPEED = 2.1;
+/** A sip of coffee at the meeting table, in seconds: reach for the mug, lift it, drink, put it down, let go. */
+const SIP = { reach: 0.55, lift: 0.6, drink: 1.3, lower: 0.6, letGo: 0.45 };
+const SIP_S = SIP.reach + SIP.lift + SIP.drink + SIP.lower + SIP.letGo;
+/** Getting up: how long the chair takes to swivel round before it stands. */
+const RISE_S = 0.6;
 
 const tmp = new THREE.Vector3();
 const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 0, 0.5), new THREE.Vector3(-0.98, 0, -0.15)];
@@ -17,6 +25,10 @@ const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 
  * the battery or pop out of it instead (`entry: 'battery'`, `leave('down')`),
  * and an office built while you weren't looking starts with everyone
  * already at their desks (`instant`).
+ *
+ * Called to a meeting (`joinMeeting`), it gets up and walks through the
+ * house to its place in the meeting room, keeping its desk; sent back
+ * (`leaveMeeting`), it walks back and sits down at it again.
  */
 export class Agent {
   constructor(session, world, { mode, onClick, now, instant = false, entry = 'box' }) {
@@ -31,6 +43,20 @@ export class Agent {
     this.nextChatter = 8 + Math.random() * 12;
     this.bubbleTime = 0;
     this.helpers = [];
+    // In a meeting, or on the way to one: its place there (see World.claimMeetingPlace).
+    this.place = null;
+    // Walking back from a meeting.
+    this.returning = false;
+    // Seconds until it goes to (or back from) a meeting it was called to.
+    this.cue = 0;
+    // Getting up from a chair ('rising'): the phase to walk off in, and the
+    // chair it's going to.
+    this.rising = null;
+    // At the meeting table: how far into a sip of coffee it is (-1 when not
+    // drinking), and how long until the next one.
+    this.sipT = -1;
+    this.nextSip = 0;
+    this.speed = WALK_SPEED;
     this.spawnedAt = now;
     this.color = agentColor(session.provider, session.id);
     this.colorHex = `#${this.color.getHexString()}`;
@@ -41,6 +67,8 @@ export class Agent {
 
     this.desk = world.claimDesk(this);
     this.lounge = this.desk ? null : world.claimLounge(this);
+    // What it sits on: its desk's chair, or one at the meeting table.
+    this.chair = this.desk;
     this.target = this.desk ? this.desk.approachWorld() : this.lounge.position.clone();
     this.buildLabel();
     if (instant) {
@@ -88,13 +116,223 @@ export class Agent {
       this.setPhase('seated');
       this.syncHelpers(0, true);
     } else {
+      this.world.scene.add(root);
       root.position.copy(this.lounge.position);
-      root.rotation.y = this.lounge.rotation;
+      root.rotation.set(0, this.lounge.rotation, 0);
       c.setMode('stand');
       c.setMood(status === 'waiting' ? 'cheer' : 'idle');
       this.setPhase('lounging');
     }
+    this.chair = this.desk;
+    this.returning = false;
+    this.speed = WALK_SPEED;
     for (let i = 0; i < 15; i++) c.update(0.1, i * 0.1);
+  }
+
+  // -------------------------------------------------------------- meetings
+
+  /** Free to answer a meeting call: at or on its way to its desk, or lounging. */
+  get canJoin() {
+    return !this.place && ['walking', 'turning', 'sitting', 'seated', 'lounging'].includes(this.phase);
+  }
+
+  /** In the meeting, or on its way there (not leaving for good). */
+  get inMeeting() {
+    if (this.phase === 'rising') return !!this.place && this.rising.after === 'convening';
+    return !!this.place && ['convening', 'turning', 'sitting', 'meeting'].includes(this.phase);
+  }
+
+  /**
+   * Off to the meeting room, to `place` (a chair or a spot to stand), or
+   * straight there if `instant` (an office you aren't looking at). Its desk
+   * stays its own, and its subagents stay there working.
+   */
+  joinMeeting(place, { instant = false } = {}) {
+    const atDesk = this.desk && ['turning', 'sitting', 'seated'].includes(this.phase);
+    this.place = place;
+    this.returning = false;
+    if (instant) {
+      this.getUp();
+      this.takePlace();
+      return;
+    }
+    this.say(line(this.kind, 'meeting'), 2.4);
+    const from = atDesk ? this.desk.approachWorld() : this.character.root.position.clone();
+    const path = [...(atDesk ? [from] : []), ...this.world.route(from, place.at)];
+    // Sitting at its desk, it gets up first ('turning' is still standing behind the chair).
+    if (atDesk && this.phase !== 'turning') {
+      this.rise(path, 'convening', place.chair);
+      return;
+    }
+    this.getUp();
+    this.path = path;
+    this.chair = place.chair;
+    this.speed = MEETING_SPEED;
+    this.setPhase('convening');
+  }
+
+  /**
+   * Gets up the way it sat down, backwards: its chair swivels round to face
+   * out, then it stands up and walks `path` as `after`, to `next` (the chair
+   * it's off to, if any).
+   */
+  rise(path, after, next) {
+    this.path = path;
+    this.rising = { after, next };
+    this.chair.swivelTarget = Math.PI;
+    this.putDownCup();
+    this.setPhase('rising');
+  }
+
+  /** On its feet, the chair turning back behind it, and off. */
+  stoodUp() {
+    const { after, next } = this.rising;
+    this.rising = null;
+    this.getUp();
+    // Leaving the meeting, its place there is free now.
+    if (after === 'walking') {
+      this.world.releaseMeetingPlace(this.place);
+      this.place = null;
+    }
+    this.chair = next;
+    this.speed = MEETING_SPEED;
+    this.setPhase(after);
+  }
+
+  /** Straight into its place in the meeting, no walk. */
+  takePlace() {
+    const { place } = this;
+    const c = this.character;
+    const root = c.root;
+    const status = this.computeStatus(Date.now());
+    this.chair = place.chair;
+    if (place.chair) {
+      place.chair.seat.add(root);
+      root.position.set(0, 0, 0);
+      root.rotation.set(0, 0, 0);
+      place.chair.swivelTarget = 0;
+      place.chair.swivel.rotation.y = 0;
+      this.sitAtTable();
+      c.setMode('sit');
+      c.setMood(this.moodFor(status));
+    } else {
+      this.world.scene.add(root);
+      root.position.copy(place.at);
+      root.rotation.set(0, place.yaw, 0);
+      c.setMode('stand');
+      c.setMood(status === 'waiting' ? 'cheer' : 'idle');
+    }
+    this.visualStatus = this.lastStatus = status;
+    if (this.desk) this.desk.swivelTarget = 0;
+    this.rising = null;
+    this.setPhase('meeting');
+    for (let i = 0; i < 15; i++) c.update(0.1, i * 0.1);
+  }
+
+  /** The meeting's over: back to its desk (or the lounge), or straight there if `instant`. */
+  leaveMeeting({ instant = false } = {}) {
+    if (!this.place) return;
+    // Called off before it was even out of its desk chair: it stays put.
+    if (this.phase === 'rising' && this.rising.after === 'convening') {
+      this.world.releaseMeetingPlace(this.place);
+      this.place = null;
+      this.rising = null;
+      if (instant) this.settle(Date.now());
+      else this.setPhase('seated');
+      return;
+    }
+    const chair = this.place.chair;
+    const seated = chair && (this.phase === 'meeting' || this.phase === 'sitting');
+    this.target = this.desk ? this.desk.approachWorld() : this.lounge.position.clone();
+    this.returning = true;
+    if (seated && !instant) {
+      this.say(line(this.kind, 'release'), 2.2);
+      this.rise([chair.approach.clone(), ...this.world.route(chair.approach, this.target)], 'walking', this.desk);
+      return;
+    }
+    this.getUp();
+    this.world.releaseMeetingPlace(this.place);
+    this.place = null;
+    this.chair = this.desk;
+    if (instant) {
+      this.settle(Date.now());
+      return;
+    }
+    this.path = this.world.route(this.character.root.position.clone(), this.target);
+    this.speed = MEETING_SPEED;
+    this.setPhase('walking');
+    this.say(line(this.kind, 'release'), 2.2);
+  }
+
+  /** Up out of whatever chair it's in, standing where it was. */
+  getUp() {
+    const root = this.character.root;
+    if (root.parent !== this.world.scene) reparent(this.world.scene, root);
+    if (this.desk) this.desk.swivelTarget = 0;
+    const chair = this.chair;
+    if (chair && chair !== this.desk) {
+      chair.swivelTarget = 0;
+      chair.slidePad(null);
+      this.putDownCup();
+      this.character.setTable(null);
+    }
+  }
+
+  /**
+   * Sat down at the meeting table: notepad and pen out (the pad pulled in
+   * closer, for a mascot with short arms), coffee soon.
+   */
+  sitAtTable() {
+    const { chair, character: c } = this;
+    const { pad, cup } = chair.setting;
+    const at = c.padSpot ? new THREE.Vector3(c.padSpot.x, pad.y, c.padSpot.z) : pad;
+    chair.slidePad(at);
+    c.setTable({ pad: at, padTurn: chair.padTurn, cup });
+    this.sipT = -1;
+    this.nextSip = 2 + Math.random() * 7;
+  }
+
+  /**
+   * At the meeting table, now and then a sip of coffee (not while napping,
+   * or waving at you): its hand brings the mug up to its mouth and back.
+   */
+  drink(dt, status) {
+    const c = this.character;
+    if (this.sipT < 0) {
+      if (status !== 'waiting' && status !== 'sleeping') this.nextSip -= dt;
+      if (this.nextSip > 0) {
+        c.setMood(this.moodFor(status));
+        return;
+      }
+      this.sipT = 0;
+    }
+    this.sipT += dt;
+    c.setMood('sip');
+    c.sip = sipLift(this.sipT);
+    if (this.sipT > SIP_S) {
+      this.putDownCup();
+      this.nextSip = 8 + Math.random() * 14;
+    }
+  }
+
+  /**
+   * The mug in its hand while it drinks: leaving the table as the hand lifts
+   * it, tipping up to drink. After the character's update, so it's this
+   * frame's hand.
+   */
+  holdCup() {
+    const c = this.character;
+    const { smoothstep } = THREE.MathUtils;
+    const held = smoothstep(c.sip, 0, 0.25);
+    this.chair.holdCup(held > 0 ? c.cupWorld(tmp) : null, smoothstep(c.sip, 0.6, 1) * 0.6, held);
+  }
+
+  /** Its mug back on the table, if it was drinking. */
+  putDownCup() {
+    if (this.sipT < 0) return;
+    this.sipT = -1;
+    this.character.sip = 0;
+    this.chair.holdCup(null);
   }
 
   makeCharacter(kind) {
@@ -202,6 +440,7 @@ export class Agent {
       return;
     }
     this.prevPhase = this.phase;
+    if (this.chair && this.chair !== this.desk) this.putDownCup();
     this.phase = 'leaving';
     this.phaseTime = 0;
     // Poofs right here, saying why: the session ended, it's needed upstairs,
@@ -212,8 +451,14 @@ export class Agent {
   depart() {
     const root = this.character.root;
     // Back to the aisle behind the chairs first, not through the next chair.
-    const aisle = this.desk ? this.desk.approachWorld() : root.getWorldPosition(new THREE.Vector3());
-    this.world.scene.attach(root);
+    const away = this.place || this.returning;
+    this.rising = null;
+    const aisle = this.desk && !away ? this.desk.approachWorld() : root.getWorldPosition(new THREE.Vector3());
+    this.getUp();
+    this.chair = null;
+    if (this.place) this.world.releaseMeetingPlace(this.place);
+    this.place = null;
+    this.returning = false;
     if (this.desk) {
       this.desk.agent = null;
       this.desk.swivelTarget = 0;
@@ -228,7 +473,10 @@ export class Agent {
       h.character.dispose();
     }
     this.helpers = [];
-    this.path = [aisle, ...this.world.pathToBattery(aisle)];
+    // From the house, back through it to the garage first.
+    const start = away ? this.world.route(aisle, this.world.way[0]) : [aisle];
+    this.path = [...start, ...this.world.pathToBattery(start.at(-1))];
+    this.speed = WALK_SPEED;
     this.sink = 0;
     this.setPhase('departing');
     this.say(line(this.kind, 'down'), 2.4);
@@ -248,9 +496,12 @@ export class Agent {
     this.label.removeFromParent();
     next.root.add(this.label);
     const pos = old.root.getWorldPosition(new THREE.Vector3());
+    // A mug it was drinking from goes back down: the new one sits down afresh.
+    if (old.table) this.putDownCup();
     old.dispose();
     this.character = next;
     this.kind = kind;
+    if (old.table) this.sitAtTable();
     this.world.effects.poof(pos, { scale: 0.8, count: 10 });
     for (const h of this.helpers) this.world.effects.poof(h.root.getWorldPosition(new THREE.Vector3()), { scale: 0.5, count: 6 });
     this.syncHelpers(0, true);
@@ -264,6 +515,7 @@ export class Agent {
     this.lounge = null;
     desk.agent = this;
     this.desk = desk;
+    this.chair = desk;
     this.target = desk.approachWorld();
     const p = this.character.root.position;
     this.path = [new THREE.Vector3(p.x, 0, 2.95), new THREE.Vector3(0, 0, 2.95), new THREE.Vector3(0, 0, this.target.z), this.target.clone()];
@@ -278,7 +530,7 @@ export class Agent {
     if (status !== this.visualStatus || this.lastStatus === null) {
       const prev = this.visualStatus;
       this.visualStatus = status;
-      if (this.phase === 'seated' || this.phase === 'lounging') this.onStatusChange(prev, status);
+      if (this.phase === 'seated' || this.phase === 'lounging' || this.phase === 'meeting') this.onStatusChange(prev, status);
     }
     this.lastStatus = status;
 
@@ -296,10 +548,31 @@ export class Agent {
       case 'walking': {
         c.setMode('walk');
         if (this.walkPath(dt)) {
+          this.returning = false;
+          this.speed = WALK_SPEED;
           this.setPhase(this.desk ? 'turning' : 'lounging');
           break;
         }
         if (this.desk && this.path.length <= 1) this.desk.swivelTarget = Math.PI;
+        break;
+      }
+      case 'rising': {
+        // Still sitting while the chair swivels round, then up.
+        c.setMode('sit');
+        c.setMood('idle');
+        if (this.phaseTime > RISE_S) this.stoodUp();
+        break;
+      }
+      case 'convening': {
+        c.setMode('walk');
+        const chair = this.place.chair;
+        if (this.walkPath(dt)) {
+          this.speed = WALK_SPEED;
+          this.setPhase(chair ? 'turning' : 'meeting');
+          break;
+        }
+        // Its chair swivels round to meet it, as at a desk.
+        if (chair && this.path.length <= 1) chair.swivelTarget = Math.PI;
         break;
       }
       case 'departing': {
@@ -323,11 +596,13 @@ export class Agent {
         break;
       }
       case 'turning': {
+        // Back to the chair, then sit down in it.
         c.setMode('stand');
         c.setMood('idle');
-        root.rotation.y = dampAngle(root.rotation.y, 0, 10, dt);
+        root.rotation.y = dampAngle(root.rotation.y, this.chair.backYaw, 10, dt);
         if (this.phaseTime > 0.45) {
-          this.desk.seat.attach(root);
+          reparent(this.chair.seat, root);
+          if (this.place) this.sitAtTable();
           this.setPhase('sitting');
         }
         break;
@@ -340,7 +615,7 @@ export class Agent {
         root.rotation.y = dampAngle(root.rotation.y, 0, 8, dt);
         if (this.phaseTime > 0.7) {
           root.position.set(0, 0, 0);
-          this.setPhase('seated');
+          this.setPhase(this.place ? 'meeting' : 'seated');
           this.onStatusChange(null, status);
         }
         break;
@@ -355,6 +630,21 @@ export class Agent {
         c.setMode('stand');
         c.setMood(status === 'waiting' ? 'cheer' : 'idle');
         root.rotation.y = dampAngle(root.rotation.y, this.lounge.rotation, 5, dt);
+        break;
+      }
+      case 'meeting': {
+        // At the table it takes notes and drinks its coffee (or waves at
+        // you, or naps); standing, it waits like in the lounge.
+        const chair = this.place.chair;
+        if (chair) {
+          c.setMode('sit');
+          chair.swivelTarget = 0;
+          this.drink(dt, status);
+        } else {
+          c.setMode('stand');
+          c.setMood(status === 'waiting' ? 'cheer' : 'idle');
+          root.rotation.y = dampAngle(root.rotation.y, this.place.yaw, 5, dt);
+        }
         break;
       }
       case 'leaving': {
@@ -394,7 +684,7 @@ export class Agent {
       c.talking = false;
     }
 
-    if (this.phase === 'seated' || this.phase === 'lounging') {
+    if (this.phase === 'seated' || this.phase === 'lounging' || this.phase === 'meeting') {
       this.nextChatter -= dt;
       if (this.nextChatter <= 0) {
         this.nextChatter = 18 + Math.random() * 30;
@@ -405,15 +695,18 @@ export class Agent {
     }
 
     c.update(dt, t);
+    if (this.sipT >= 0) this.holdCup();
     for (const h of this.helpers) {
       h.character.setMood(h.mood);
       h.character.update(dt, t);
     }
 
     if (this.desk && this.phase !== 'gone') {
-      const deskStatus = this.phase === 'seated' || this.phase === 'leaving' ? status : null;
+      // Off in a meeting, its desk carries on showing what the session's doing.
+      const live = this.phase === 'seated' || this.phase === 'leaving' || this.inMeeting;
+      const deskStatus = live ? status : null;
       this.desk.setStatus(deskStatus, deskStatus ? STATUS_COLORS[deskStatus] : null);
-      if (this.phase === 'seated' || this.phase === 'leaving') this.desk.screen.draw(this.session, status, now, t);
+      if (live) this.desk.screen.draw(this.session, status, now, t);
     }
     this.renderLabel(now);
   }
@@ -424,10 +717,13 @@ export class Agent {
     this.nextChatter = 15 + Math.random() * 20;
   }
 
-  /** Subagents appear as mini versions of the mascot standing by the desk. */
+  /**
+   * Subagents appear as mini versions of the mascot standing by the desk,
+   * and carry on there while it's in a meeting.
+   */
   syncHelpers(dt, rebuild = false) {
     if (!this.desk) return;
-    const want = this.phase === 'seated' ? Math.min(HELPER_SPOTS.length, this.session.helpers || 0) : 0;
+    const want = this.phase === 'seated' || this.inMeeting ? Math.min(HELPER_SPOTS.length, this.session.helpers || 0) : 0;
     if (rebuild) {
       for (const h of this.helpers) h.character.dispose();
       this.helpers = [];
@@ -470,7 +766,7 @@ export class Agent {
     if (dist < 0.05) {
       this.path.shift();
     } else {
-      root.position.addScaledVector(d.normalize(), Math.min(dist, WALK_SPEED * dt));
+      root.position.addScaledVector(d.normalize(), Math.min(dist, this.speed * dt));
       root.rotation.y = dampAngle(root.rotation.y, Math.atan2(d.x, d.z), 10, dt);
     }
     return false;
@@ -543,6 +839,12 @@ export class Agent {
     this.label.element.remove();
     for (const h of this.helpers) h.character.dispose();
     this.helpers = [];
+    if (this.chair && this.chair !== this.desk) {
+      this.putDownCup();
+      this.chair.swivelTarget = 0;
+    }
+    this.world.releaseMeetingPlace(this.place);
+    this.place = null;
     this.character.dispose();
     if (this.desk) {
       this.desk.agent = null;
@@ -555,7 +857,21 @@ export class Agent {
 
   /** World-space anchor for camera focus: the monitor (or the agent). */
   focusPoints() {
-    if (this.desk) {
+    const atTable = this.place && (['turning', 'sitting', 'meeting'].includes(this.phase)
+      || (this.phase === 'rising' && this.rising.after === 'walking'));
+    if (atTable) {
+      // In a meeting: from across the table, looking a little to its left
+      // (the screen's right) so the side panel doesn't cover it.
+      const p = this.character.root.getWorldPosition(new THREE.Vector3());
+      const ahead = new THREE.Vector3(Math.sin(this.place.yaw), 0, Math.cos(this.place.yaw));
+      const left = new THREE.Vector3(ahead.z, 0, -ahead.x);
+      return {
+        eye: p.clone().addScaledVector(ahead, 4.1).addScaledVector(left, 1.4).setY(4.1),
+        look: p.clone().addScaledVector(left, 0.75).setY(1.0),
+      };
+    }
+    // On its way to the meeting, it's off somewhere between the two.
+    if (this.desk && this.phase !== 'convening') {
       // Over the shoulder and a bit high, so the head doesn't hide the screen.
       // Looking slightly right of the monitor keeps it clear of the side panel.
       const look = this.desk.root.localToWorld(new THREE.Vector3(0.55, 1.15, -0.2));
@@ -577,14 +893,27 @@ function hop(out, a, b, k) {
   out.y += Math.sin(k * Math.PI) * 0.45;
 }
 
-function elasticOut(x) {
-  if (x <= 0) return 0.01;
-  if (x >= 1) return 1;
-  return Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+/** How far the mug is lifted, 0 to 1, `t` seconds into a sip. */
+function sipLift(t) {
+  const ease = THREE.MathUtils.smootherstep;
+  let a = t - SIP.reach;
+  if (a < 0) return 0;
+  if (a < SIP.lift) return ease(a, 0, SIP.lift);
+  a -= SIP.lift + SIP.drink;
+  if (a < 0) return 1;
+  if (a < SIP.lower) return 1 - ease(a, 0, SIP.lower);
+  return 0;
 }
 
-function dampAngle(a, b, lambda, dt) {
-  let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * (1 - Math.exp(-lambda * dt));
+const _turn = new THREE.Euler();
+
+/**
+ * Moves the mascot under `parent`, keeping where it is in the room, as a
+ * plain turn about y. attach() alone can come out with a half turn as a flip
+ * about x and z instead, and walking and sitting, which only turn y, would
+ * then face it the wrong way round.
+ */
+function reparent(parent, root) {
+  parent.attach(root);
+  root.rotation.set(0, _turn.setFromQuaternion(root.quaternion, 'YXZ').y, 0);
 }

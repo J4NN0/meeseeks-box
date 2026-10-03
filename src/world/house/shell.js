@@ -1,18 +1,17 @@
 import * as THREE from 'three';
 import { PALETTE, box, cyl, mesh, sphere, toon } from '../../engine/toon.js';
-import { COLORS, DADO, DOOR, LIVING_ROOM, T } from './plan.js';
+import { ARCH, COLORS, DADO, DOOR, LIVING_ROOM, T } from './plan.js';
 import { NO_SHADOW, archRing, extrude, openWall, slab, windowFrame } from '../walls.js';
 
 // The living room's floor, walls and ceiling. The back wall always stands.
 // The wall to the garage (with the door) and the front wall behind the
-// couch (with the arch through to the spare room) are cut down to the dado
+// couch (with the arch through to the meeting room) are cut down to the dado
 // in the overview. The rest of those two, the right wall with the sliding
 // glass door to the yard, the door itself and the beamed ceiling only go up
 // when you walk in.
 
-// The arch through to the spare room (x along the front wall), and the
-// sliding glass door out to the yard (z along the right wall).
-const ARCH = { x: 12.1, width: 1.1, spring: 1.75 };
+// The trim round the arch to the meeting room, and the sliding glass door
+// out to the yard (z along the right wall).
 const ARCH_TRIM = 0.08;
 const PATIO = { at: -2.3, width: 2.4, bottom: 0, top: 2.25 };
 /** How far the door swings into the living room when it's open. */
@@ -68,15 +67,15 @@ export function buildShell({ theme, height: H }) {
   const door = doorLeaf();
   walls.add(door);
 
-  // The front wall, behind the couch: our paint on this side, the spare
+  // The front wall, behind the couch: our paint on this side, the meeting
   // room's on that one, the arch through it. Cut down to the dado in the
   // overview too.
   const r = ARCH.width / 2;
   const archFrom = ARCH.x - r;
   const archTo = ARCH.x + r;
-  const spare = toon(COLORS.spare);
+  const meeting = toon(COLORS.meeting);
   for (const [a, b] of [[minX, archFrom], [archTo, x1]]) {
-    group.add(slab(b - a, DADO, T, [ends, ends, ends, ends, spare, wall], (a + b) / 2, DADO / 2, maxZ + T / 2));
+    group.add(slab(b - a, DADO, T, [ends, ends, ends, ends, meeting, wall], (a + b) / 2, DADO / 2, maxZ + T / 2));
   }
   const upper = new THREE.Shape();
   upper.moveTo(minX, DADO);
@@ -90,7 +89,7 @@ export function buildShell({ theme, height: H }) {
   upper.closePath();
   // Above the dado, a skin of each paint.
   walls.add(mesh(extrude(upper, T / 2).translate(0, 0, maxZ), wall, NO_SHADOW));
-  walls.add(mesh(extrude(upper, T / 2).translate(0, 0, maxZ + T / 2), spare, NO_SHADOW));
+  walls.add(mesh(extrude(upper, T / 2).translate(0, 0, maxZ + T / 2), meeting, NO_SHADOW));
   // The arch: lined in white, cased in white on both sides, a threshold.
   walls.add(mesh(extrude(archRing(ARCH, r - 0.02, r), T).translate(0, 0, maxZ), trim, NO_SHADOW));
   for (const z of [maxZ - 0.025, z1]) walls.add(mesh(extrude(archRing(ARCH, r, r + ARCH_TRIM), 0.025).translate(0, 0, z), trim, NO_SHADOW));
@@ -128,7 +127,6 @@ export function buildShell({ theme, height: H }) {
   };
 }
 
-/** The door from the garage, hinged at its front edge, swinging into the living room. */
 /** The faces of a wall to the garage: `paint` on our side (-x faces the garage), its trim on the ends. */
 function garageSides(theme, paint, garage) {
   const ends = toon(theme.wallTrim);
@@ -139,7 +137,7 @@ function garageSides(theme, paint, garage) {
  * A wall to the garage along z at `x`, from `from` to `to`: garage paint on
  * its side, with its dado rail and skirting, `paint` on ours. In the overview
  * only the part below the dado stands, its cut top in trim; the rest goes in
- * `walls`. Shared by the living room and the spare room.
+ * `walls`. Shared by the living room and the meeting room.
  */
 export function garageWall({ group, walls, theme, paint, x, from, to, height: H }) {
   const len = to - from;
@@ -151,6 +149,7 @@ export function garageWall({ group, walls, theme, paint, x, from, to, height: H 
   group.add(box(0.06, 0.12, len, theme.wallTrim, x - T - 0.03, 0.06, zc, NO_SHADOW));
 }
 
+/** The door from the garage, hinged at its front edge, swinging into the living room. */
 function doorLeaf() {
   const pivot = new THREE.Group();
   pivot.position.set(LIVING_ROOM.minX - 0.025, 0, DOOR.z + DOOR.width / 2 - 0.01);

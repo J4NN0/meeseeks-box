@@ -9,7 +9,7 @@ import { NO_SHADOW, openWall } from './walls.js';
 
 // Rick's garage, now a seed-stage startup. A cut-away diorama: floor, back
 // wall and left wall; the open sides face the camera. Through a door in its
-// right wall, the Smiths' living room and a spare room (house/). The universes in the
+// right wall, the Smiths' living room and a meeting room (house/). The universes in the
 // car battery reuse it with their own `theme` (verses.js); the wall boards
 // are shared, so every copy shows the same TV and whiteboard.
 
@@ -144,7 +144,7 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   for (const [x, z] of [[-5.8, 3.7], [-4.5, 4.8], [-5.9, 5.1]]) solidCircle(x, z, 0.5);
 
   // Next door, between the car and the ping-pong table: the living room,
-  // and the spare room through it, along the rest of the right wall.
+  // and the meeting room through it, along the rest of the right wall.
   const living = buildLivingRoom({ theme, height: ROOM.height });
   room.add(living.group);
   colliders.push(...living.colliders);
@@ -184,7 +184,7 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
     /** `camera` is where you are: walking in, the living room's door opens for you. */
     update(dt, t, camera) {
       for (const u of updaters) u(dt, t);
-      living.update(dt, t, enclosure.visible && camera ? camera.position : null);
+      living.update(dt, t, camera?.position, enclosure.visible);
     },
   };
 }
@@ -214,7 +214,7 @@ function buildEnclosure(theme) {
   }
   g.add(front);
 
-  // The right wall is the living room's and the spare room's (house/).
+  // The right wall is the living room's and the meeting room's (house/).
 
   // Ceiling with exposed beams and hanging shop lamps.
   g.add(box(16.9, 0.2, 12.9, '#c9cfc6', 0, H + 0.1, 0, NO_SHADOW));

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { box, mesh } from '../engine/toon.js';
 
-// Building bits the rooms share: the garage, the living room, the spare room.
+// Building bits the rooms share: the garage, the living room, the meeting room.
 
 /** Walls are this thick. */
 export const T = 0.3;

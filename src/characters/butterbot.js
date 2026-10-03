@@ -1,12 +1,32 @@
 import * as THREE from 'three';
 import { mesh, ownToon } from '../engine/toon.js';
-import { CharacterBase, joint, limb } from './rig.js';
+import { CharacterBase, PEN_DIR, heldPen, joint, limb, pointing, solveArm } from './rig.js';
 
 // A butter-passing robot that has been promoted to software engineer.
 // "What is my purpose?" "You write code." "Oh my god."
 
 const SEAT_H = 0.47;
 const BOOSTER_H = 0.2;
+// Its arms, shoulder to elbow and elbow to claw; its body sits this far up
+// its hips (on `jolt`), its shoulders this far up the body.
+const UPPER = 0.16;
+const LOWER = 0.15;
+const BODY_Y = 0.11;
+const SHOULDER = { x: 0.165, y: 0.22 };
+// At a meeting table: short arms, so it leans in over the pad, pulls it
+// closer and writes small, with a pen this long past its claw.
+const WRITE_LEAN = 0.45;
+const PAD_SPOT = { x: -0.1, z: 0.36 };
+const PAGE_SPAN = 0.7;
+const PEN = 0.12;
+const WRITE_POLE = new THREE.Vector3(0.6, -0.4, -0.5);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const _tip = new THREE.Vector3();
+const _to = new THREE.Vector3();
+const _pole = new THREE.Vector3();
+const _chain = new THREE.Quaternion();
+const _joint = new THREE.Quaternion();
+const _euler = new THREE.Euler();
 
 export class ButterBot extends CharacterBase {
   constructor({ color = '#6ec6ee', seed = 'bot' } = {}) {
@@ -43,7 +63,7 @@ export class ButterBot extends CharacterBase {
     });
 
     // Slaps rock the body on `jolt` and send the head spinning on `headJolt`.
-    this.jolt = joint(this.hips, 0, 0.11, 0);
+    this.jolt = joint(this.hips, 0, BODY_Y, 0);
     this.body = joint(this.jolt);
     const base = mesh(new THREE.BoxGeometry(0.26, 0.05, 0.3), steelDark);
     base.position.y = 0.02;
@@ -89,19 +109,25 @@ export class ButterBot extends CharacterBase {
     this.head.add(tip);
 
     this.arms = [-1, 1].map((s) => {
-      const shoulder = joint(this.body, s * 0.165, 0.22, 0);
-      shoulder.add(limb(0.16, 0.018, steelDark, 6));
-      const elbow = joint(shoulder, 0, -0.16, 0);
-      elbow.add(limb(0.14, 0.016, steelDark, 6));
-      const claw = joint(elbow, 0, -0.15, 0);
+      const shoulder = joint(this.body, s * SHOULDER.x, SHOULDER.y, 0);
+      shoulder.add(limb(UPPER, 0.018, steelDark, 6));
+      const elbow = joint(shoulder, 0, -UPPER, 0);
+      elbow.add(limb(LOWER - 0.01, 0.016, steelDark, 6));
+      const claw = joint(elbow, 0, -LOWER, 0);
       for (const c of [-1, 1]) {
         const finger = mesh(new THREE.BoxGeometry(0.012, 0.05, 0.02), steel);
         finger.position.set(c * 0.014, -0.02, 0);
         finger.rotation.z = c * 0.3;
         claw.add(finger);
       }
-      return { shoulder, elbow, s };
+      return { shoulder, elbow, claw, s };
     });
+    // At a meeting table it writes with its -x claw and holds its mug in the other.
+    this.pen = heldPen(this.track(ownToon('#2f5fbf')), black, PEN);
+    this.arms[0].claw.add(this.pen);
+    this.padSpot = PAD_SPOT;
+    this.cupHand = this.arms[1].claw;
+    this.cupOffset.set(-0.05, -0.02, 0.03);
 
     this.booster = new THREE.Group();
     const crate = mesh(new THREE.BoxGeometry(0.46, BOOSTER_H, 0.4), this.track(ownToon('#c89b62')));
@@ -124,6 +150,8 @@ export class ButterBot extends CharacterBase {
     let hipX = 0;
     this.booster.visible = this.mode === 'sit';
     if (this.updateBlink(dt)) eye = this.eyeOff;
+    // Claws follow the arm unless the pose (writing) says otherwise.
+    for (const { claw } of this.arms) p.rot(claw, 0, 0, 0);
 
     if (this.mode === 'sit') hipY = SEAT_H + BOOSTER_H;
 
@@ -138,6 +166,13 @@ export class ButterBot extends CharacterBase {
       p.rot(L.shoulder, 0, 0, -2.3 - Math.sin(time * 6) * 0.2).rot(L.elbow, -0.4, 0, 0);
       p.rot(R.shoulder, 0, 0, 2.3 + Math.sin(time * 6) * 0.2).rot(R.elbow, -0.4, 0, 0);
       hipY += Math.abs(Math.sin(time * 4)) * 0.03;
+    } else if (this.mode === 'sit' && this.table && (this.mood === 'work' || this.mood === 'think' || this.mood === 'sip')) {
+      // At a meeting table: leaning in over its notes, and now and then some coffee.
+      const sip = this.mood === 'sip' ? this.sip : 0;
+      p.rot(this.body, WRITE_LEAN, 0, 0).rot(this.head, 0.15 - sip * 0.45, Math.sin(time * 0.6) * 0.15 * (1 - sip), 0);
+      this.writePose(p, dt, time, L, hipY, this.mood === 'think' ? { tap: true } : { rate: this.mood === 'sip' ? 0 : 1 });
+      if (this.mood === 'sip') p.rot(R.shoulder, -1.25 - sip * 0.55, -0.3 - sip * 0.25, 0.15 + sip * 0.2).rot(R.elbow, -0.25 - sip * 1.45, 0, 0);
+      else p.rot(R.shoulder, -0.75, -0.2, 0.15).rot(R.elbow, -0.6, 0, 0);
     } else if (this.mode === 'sit' && (this.mood === 'work' || this.mood === 'think')) {
       const a = Math.sin(time * 18) * 0.12;
       p.rot(this.body, 0.1, 0, 0).rot(this.head, 0.2, Math.sin(time * 0.8) * 0.2, 0);
@@ -174,5 +209,26 @@ export class ButterBot extends CharacterBase {
     this.booster.position.y = SEAT_H + BOOSTER_H;
     if (snap) this.eyeMat.color.copy(eye);
     else this.eyeMat.color.lerp(eye, 1 - Math.exp(-20 * dt));
+  }
+
+  /**
+   * Writing on the pad (leaning in by WRITE_LEAN): the pen's tip on the
+   * paper where penTip says, the claw turned so the pen points down at it,
+   * the arm reaching the claw. `hipY` is where its hips are.
+   */
+  writePose(p, dt, time, { shoulder, elbow, claw, s }, hipY, how) {
+    this.penAt(dt, time, { ...how, span: PAGE_SPAN }, _tip);
+    // The claw, from the shoulder in the leaning body's frame.
+    _to.copy(_tip).addScaledVector(PEN_DIR, -PEN);
+    _to.y -= hipY + BODY_Y;
+    _to.applyAxisAngle(X_AXIS, -WRITE_LEAN);
+    _to.x -= s * SHOULDER.x;
+    _to.y -= SHOULDER.y;
+    const arm = solveArm(_to, _pole.set(s * WRITE_POLE.x, WRITE_POLE.y, WRITE_POLE.z), UPPER, LOWER);
+    p.rot(shoulder, arm.x, arm.y, arm.z).rot(elbow, arm.bend, 0, 0);
+    _chain.setFromAxisAngle(X_AXIS, WRITE_LEAN)
+      .multiply(_joint.setFromEuler(_euler.set(arm.x, arm.y, arm.z)))
+      .multiply(_joint.setFromAxisAngle(X_AXIS, arm.bend));
+    p.turn(claw, pointing(_chain, PEN_DIR));
   }
 }

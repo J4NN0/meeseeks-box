@@ -12,6 +12,9 @@ import { visualStatus } from './status.js';
 // until then it's a list of who works there. Visiting builds its scene
 // (behind the transition), only the office you're in is drawn and animated,
 // and one you left is freed a minute later.
+//
+// A meeting is called everywhere at once: in every universe the agents go
+// to their own meeting room, and the ones in the others join on screen.
 
 const KEEP_WARM_MS = 60_000;
 
@@ -74,11 +77,45 @@ export class Multiverse {
     this.universes = [new Universe(0)];
     this.needed = 1;
     this.active = this.universes[0];
+    this.meeting = false;
     this.build(this.active);
   }
 
   build(universe) {
     universe.build({ boards: this.boards, mode: this.mode, onClick: this.onClick, onEnterGate: this.onEnterGate });
+    universe.manager.meeting = this.meeting;
+  }
+
+  /**
+   * Calls a meeting, or ends it: everyone goes to the meeting room (the
+   * office you're in walks there, the others are there already), and back.
+   */
+  setMeeting(on) {
+    if (on === this.meeting) return;
+    this.meeting = on;
+    for (const u of this.universes) if (u.built) u.manager.setMeeting(on, { instant: u !== this.active });
+    this.holdSeats();
+  }
+
+  /** Nobody changes universe while there's a meeting, or anyone's still on their way back from one. */
+  holdSeats() {
+    this.seating.hold = this.meeting || this.universes.some((u) => u.built && u.manager.busy);
+  }
+
+  /** The other universes on the call, for the meeting room's screens: who's in each. */
+  calls(now) {
+    if (!this.meeting) return [];
+    return this.universes
+      .filter((u) => u !== this.active && u.level < this.needed && u.sessions.length)
+      .map((u) => ({
+        level: u.level,
+        name: u.verse.name,
+        color: u.verse.neon,
+        agents: u.sessions.map((s) => this.records.get(s.id)).filter(Boolean).map((r) => {
+          r.visualStatus = visualStatus(r.session, now);
+          return r;
+        }),
+      }));
   }
 
   isOpen(level) {
@@ -86,6 +123,7 @@ export class Multiverse {
   }
 
   sync(sessions, now) {
+    this.holdSeats();
     const { levels, moves, arrivals, gone } = this.seating.update(sessions, now);
     this.needed = levels.length;
 
@@ -137,9 +175,11 @@ export class Multiverse {
       this.build(to);
       to.manager.sync(to.sessions, now, { instant: true });
     }
-    // It stops animating once you leave: settle mid-walk exits and the
-    // spawn queue now, or they'd freeze until you come back.
+    // It stops animating once you leave: settle mid-walk exits, the spawn
+    // queue and walks to and from a meeting now, or they'd freeze until you
+    // come back.
     this.active.manager.sync(this.active.sessions, now, { instant: true });
+    this.active.manager.settleMeeting();
     this.active.world.effects.clear();
     this.active.hideLabels();
     this.active.leftAt = now;

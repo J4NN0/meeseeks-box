@@ -1,26 +1,27 @@
 import * as THREE from 'three';
 import { PALETTE, box, toon } from '../../engine/toon.js';
-import { COLORS, SPARE_ROOM, T } from './plan.js';
+import { COLORS, MEETING_ROOM, T } from './plan.js';
 import { garageWall } from './shell.js';
 import { NO_SHADOW, openWall, windowFrame } from '../walls.js';
 
-// The spare room, through the arch behind the living room couch: empty for
-// now, green walls and bare floorboards. Like the others it's a cut-away:
-// its wall to the garage stands to the dado in the overview, and its front
-// and right walls (with windows) and its ceiling go up when you walk in. The
-// wall it shares with the living room, arch and all, is in shell.js.
+// The meeting room's floor, walls and ceiling, through the arch behind the
+// living room couch: green walls and bare floorboards. Like the others it's
+// a cut-away: its wall to the garage stands to the dado in the overview, and
+// its front and right walls (with windows) and its ceiling go up when you
+// walk in. The wall it shares with the living room, arch and all, is in
+// shell.js; what's in the room is in meeting.js.
 
 /** Its windows, along the front wall and the right wall from each one's middle. */
 const WINDOWS = { front: [-1.6, 1.6], right: [0], width: 1.6, bottom: 0.9, top: 2.45 };
 
 /** As buildShell: `group` always shown, `walls` only when walking, `colliders`. */
-export function buildSpareRoom({ theme, height: H }) {
+export function buildMeetingRoom({ theme, height: H }) {
   const group = new THREE.Group();
   const walls = new THREE.Group();
-  const { minX, maxX, minZ, maxZ } = SPARE_ROOM;
+  const { minX, maxX, minZ, maxZ } = MEETING_ROOM;
   const x1 = maxX + T;
   const z1 = maxZ + T;
-  const paint = toon(COLORS.spare);
+  const paint = toon(COLORS.meeting);
   const trim = toon(COLORS.trim);
 
   // The slab and its base, like the living room's, floorboards on top.

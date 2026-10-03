@@ -14,7 +14,7 @@ const LEGEND_STATUSES = [
 ];
 
 export class Hud {
-  constructor({ mode, onModeChange, onWalk, onReset, onClosePanel, onGoToAgent, onVerse }) {
+  constructor({ mode, onModeChange, onWalk, onMeeting, onReset, onClosePanel, onGoToAgent, onVerse }) {
     const select = $('mascot-mode');
     for (const [value, label] of Object.entries(MASCOT_MODES)) select.add(new Option(label, value, false, value === mode));
     select.addEventListener('change', () => onModeChange(select.value));
@@ -23,6 +23,8 @@ export class Hud {
     this.walkBtn.addEventListener('click', () => onWalk());
     // Walking needs a mouse to capture; hide it on touch-only devices.
     if (!window.matchMedia('(pointer: fine)').matches) this.walkBtn.hidden = true;
+    this.meetingBtn = $('meeting-toggle');
+    this.meetingBtn.addEventListener('click', () => onMeeting());
     $('reset-view').addEventListener('click', () => onReset());
     $('panel-close').addEventListener('click', () => onClosePanel());
     $('legend').innerHTML = [
@@ -64,6 +66,12 @@ export class Hud {
     $('walk-hint').hidden = !(active && locked);
     $('walk-pause').hidden = !(active && !locked && !flying && !this.panelOpen);
     $('walk-pause').classList.toggle('resuming', !!resuming);
+  }
+
+  /** The meeting button: pressed while one's on, and pressing it again ends it. */
+  setMeeting(on) {
+    this.meetingBtn.setAttribute('aria-pressed', String(on));
+    this.meetingBtn.title = on ? 'End the meeting: everyone back to their desks' : 'Call every agent to the meeting room';
   }
 
   /** What the crosshair is on: an agent, a board item (its label), or nothing. */

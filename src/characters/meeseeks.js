@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mesh, noInk, ownToon, rng } from '../engine/toon.js';
-import { CharacterBase, joint, limb, solveArm } from './rig.js';
+import { CharacterBase, PEN_DIR, heldPen, joint, limb, pointing, solveArm } from './rig.js';
 import { markMaterial } from './slap.js';
 import { CHAIR_Z, KEYBOARD_Z, KEY_TOP } from '../world/desk.js';
 
@@ -26,7 +26,16 @@ const CHEEK = { phi: 0.61, theta: 1.75, size: 0.78 };
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const UP = new THREE.Vector3(0, 1, 0);
+// At a meeting table: how far the pen's tip is past the hand holding it,
+// and the mug's middle once it's up at the mouth.
+const PEN = 0.11;
+const MOUTH_CUP = new THREE.Vector3(0.02, 1.14, 0.3);
+const WRITE_POLE = new THREE.Vector3(0.7, -0.5, -0.4);
+const CUP_POLE = new THREE.Vector3(0.9, -0.6, 0.1);
+const REST_POLE = new THREE.Vector3(0.8, -0.5, -0.3);
 const _target = new THREE.Vector3();
+const _reach = new THREE.Vector3();
+const _tip = new THREE.Vector3();
 const _pole = new THREE.Vector3();
 const _back = new THREE.Vector3();
 const _side = new THREE.Vector3();
@@ -182,6 +191,12 @@ export class Meeseeks extends CharacterBase {
       thumbJoint.add(thumb);
       return { shoulder, elbow, hand, s };
     });
+    // It writes with its -x hand and drinks with its +x one, the mug's
+    // handle in its fingers.
+    this.pen = heldPen(this.track(ownToon('#2f5fbf')), black, PEN);
+    this.arms[0].hand.add(this.pen);
+    this.cupHand = this.arms[1].hand;
+    this.cupOffset.set(-0.07, 0, 0);
 
     this.accessory = accessory || ACCESSORIES[Math.floor(r() * ACCESSORIES.length)];
     this.addAccessory(this.accessory, r);
@@ -293,7 +308,7 @@ export class Meeseeks extends CharacterBase {
       p.pos(this.hips, 0, HIP_SIT, 0).rot(this.hips, 0, 0, 0);
       p.rot(LL.hip, -1.5, 0, -0.08).rot(LL.knee, 1.45, 0, 0);
       p.rot(RL.hip, -1.5, 0, 0.08).rot(RL.knee, 1.45, 0, 0);
-      this.sitPose(p, time, L, R);
+      this.sitPose(p, dt, time, L, R);
       if (this.mood === 'sleep') { eyeScale = 0.08; mouthOpen = 0.55 + Math.sin(time * 1.4) * 0.35; }
       if (this.mood === 'stress') { eyeScale = 1.15; mouthOpen = 1; speed = 18; }
       if (this.mood === 'wait') mouthOpen = 0.6;
@@ -326,8 +341,20 @@ export class Meeseeks extends CharacterBase {
     this.mouth.scale.y = THREE.MathUtils.damp(this.mouth.scale.y, Math.max(0.15, mouthOpen), 18, dt);
   }
 
-  sitPose(p, time, L, R) {
+  sitPose(p, dt, time, L, R) {
     const mood = this.mood;
+    if (this.table && (mood === 'work' || mood === 'think' || mood === 'sip')) {
+      this.tablePose(p, dt, time, L, R);
+      return;
+    }
+    if (this.table && mood === 'stress' && Math.sin(time * 0.9) <= 0.1) {
+      // Between bouts of panic, scribbling like mad.
+      const shake = Math.sin(time * 42) * 0.05;
+      p.rot(this.chest, 0.26, 0, shake).rot(this.head, 0.3, 0, shake * 2);
+      this.writePose(p, dt, time, L, { lean: 0.26, rate: 2.6 });
+      this.restPose(p, R, 0.26);
+      return;
+    }
     if (mood === 'work' || mood === 'think') {
       p.rot(this.chest, 0.16, 0, 0);
       p.rot(this.head, 0.12 + Math.sin(time * 3) * 0.02, Math.sin(time * 0.5) * 0.12, 0);
@@ -369,6 +396,65 @@ export class Meeseeks extends CharacterBase {
       p.rot(L.shoulder, -0.4, 0, -0.18).rot(L.elbow, -0.7, 0, 0);
       p.rot(R.shoulder, -0.4, 0, 0.18).rot(R.elbow, -0.7, 0, 0);
     }
+  }
+
+  /**
+   * At a meeting table: taking notes, hand on chin if it's thinking, and
+   * every so often (`sip` mood) a drink of coffee.
+   */
+  tablePose(p, dt, time, L, R) {
+    const { mood } = this;
+    const sip = mood === 'sip' ? this.sip : 0;
+    const lean = 0.14 - sip * 0.12;
+    p.rot(this.chest, lean, 0, 0);
+    if (mood === 'sip') {
+      // Eyes on the mug as it comes up, head back to drink.
+      p.rot(this.head, 0.22 - sip * 0.42, 0.18 * (1 - sip), 0);
+      this.writePose(p, dt, time, L, { lean, rate: 0 });
+      const { cup } = this.table;
+      // The hand goes to the handle, on the mug's +x side.
+      _reach.set(cup.x - this.cupOffset.x, cup.y, cup.z).lerp(_target.copy(MOUTH_CUP).sub(this.cupOffset), sip);
+      this.reach(p, R, _reach, lean, CUP_POLE);
+    } else if (mood === 'think') {
+      // "Hmm, what would Rick do?", tapping the pen on the pad.
+      p.rot(R.shoulder, -1.05, -0.35, 0.1).rot(R.elbow, -2.2, 0, 0);
+      p.rot(this.head, 0.06, 0.1, 0.16);
+      this.writePose(p, dt, time, L, { lean, tap: true });
+    } else {
+      p.rot(this.head, 0.34 + Math.sin(time * 3) * 0.02, Math.sin(time * 0.5) * 0.08, 0);
+      this.writePose(p, dt, time, L, { lean, rate: 1 });
+      this.restPose(p, R, lean);
+    }
+  }
+
+  /**
+   * Writing on the pad: the pen's tip on the paper where penTip says, the
+   * hand turned so the pen points down at it, the arm reaching the hand.
+   */
+  writePose(p, dt, time, arm, { lean, ...how }) {
+    this.penAt(dt, time, how, _tip);
+    const sol = this.reach(p, arm, _reach.copy(_tip).addScaledVector(PEN_DIR, -PEN), lean, WRITE_POLE);
+    _qArm.setFromAxisAngle(X_AXIS, lean)
+      .multiply(_qJoint.setFromEuler(_euler.set(sol.x, sol.y, sol.z)))
+      .multiply(_qJoint.setFromAxisAngle(X_AXIS, sol.bend));
+    p.turn(arm.hand, pointing(_qArm, PEN_DIR));
+  }
+
+  /** The other hand resting on the table, by the mug. */
+  restPose(p, arm, lean) {
+    const { cup, pad } = this.table;
+    this.reach(p, arm, _reach.set(cup.x - 0.1, pad.y + 0.03, cup.z - 0.08), lean, REST_POLE);
+  }
+
+  /** Puts `arm`'s hand at `target` (in its own frame), the elbow towards `pole`, with the chest leaning by `lean`. */
+  reach(p, { shoulder, elbow, s }, target, lean, pole) {
+    _target.set(target.x, target.y - HIP_SIT - CHEST_Y, target.z).applyAxisAngle(X_AXIS, -lean);
+    _target.x -= s * SHOULDER.x;
+    _target.y -= SHOULDER.y;
+    _pole.set(s * pole.x, pole.y, pole.z);
+    const arm = solveArm(_target, _pole, UPPER_ARM, FOREARM);
+    p.rot(shoulder, arm.x, arm.y, arm.z).rot(elbow, arm.bend, 0, 0);
+    return arm;
   }
 
   /**

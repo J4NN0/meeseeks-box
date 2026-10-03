@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { buildRoom } from './room.js';
-import { Desk } from './desk.js';
+import { CHAIR_Z, Desk } from './desk.js';
 import { Effects } from './effects.js';
 import { createMeeseeksBox } from './box.js';
 import { createBattery } from './battery.js';
 import { verse } from './verses.js';
+import { DOOR, LIVING_ROOM } from './house/index.js';
+import { nearestOnPath } from './paths.js';
 
 const COLS = [-3.3, -1.1, 1.1, 3.3];
 const ROWS = [-3.5, -1.1, 1.3];
@@ -16,6 +18,12 @@ const LOUNGE = [[-5.0, 3.1, 2.3], [-4.0, 4.2, 2.6], [-6.4, 4.4, 1.2], [5.0, 0.8,
 
 // Right of the last desk column, so walks to and from the car stay clear.
 const SIDE_AISLE_X = 4.62;
+// Behind each row of chairs, clear from one side of the garage to the other.
+const LANES = ROWS.map((z) => z + CHAIR_Z + 0.55);
+// Where the side aisle meets the line through the living room door.
+const HUB = new THREE.Vector3(SIDE_AISLE_X, 0, DOOR.z);
+// The garage's side of the wall to the house.
+const HOUSE_X = LIVING_ROOM.minX - 0.15;
 
 /**
  * One office: the garage (level 0) or a universe in a car battery. `boards`
@@ -54,6 +62,11 @@ export class World {
       this.colliders.push({ kind: 'circle', x: p.x, z: p.z + 0.66, r: 0.3 });
     }
     this.loungeTaken = new Set();
+
+    // The way to the meeting room: from the side aisle, through the house to
+    // the walk round the table.
+    this.meeting = this.room.living.meeting;
+    this.way = [HUB.clone(), ...this.room.living.way];
   }
 
   claimDesk(agent) {
@@ -93,6 +106,68 @@ export class World {
     return [new THREE.Vector3(SIDE_AISLE_X, 0, from.z), this.battery.mouth.clone()];
   }
 
+  /** A place in the meeting room: a chair at the table, or else a spot to stand. */
+  claimMeetingPlace(agent) {
+    const place = this.meeting.places.find((p) => !p.agent) || this.meeting.extraPlace();
+    place.agent = agent;
+    return place;
+  }
+
+  releaseMeetingPlace(place) {
+    if (place) place.agent = null;
+  }
+
+  /**
+   * The points to walk through from `from` to `to`, wherever they are in the
+   * garage, the living room or the meeting room: along the lanes behind the
+   * chairs and down the side aisle, through the house, round the table.
+   */
+  route(from, to) {
+    const meeting = this.meeting;
+    const zone = (p) => (p.x < HOUSE_X ? 'garage' : meeting.inside(p) ? 'meeting' : 'house');
+    const a = zone(from);
+    const b = zone(to);
+    if (a === 'meeting' && b === 'meeting') return meeting.route(from, to);
+    if (a === 'garage' && b === 'garage') return [...this.toAisle(from, to), to.clone()];
+    const end = this.way.at(-1);
+    const on = a === 'garage' ? this.toHouse(from) : a === 'meeting' ? meeting.route(from, end) : [];
+    const off = b === 'garage' ? this.toHouse(to).reverse() : b === 'meeting' ? meeting.route(end, to).slice(0, -1) : [];
+    const along = this.alongWay(wayAt(this.way, on.at(-1) || from), wayAt(this.way, off[0] || to));
+    return [...on, ...along, ...off, to.clone()];
+  }
+
+  /** From a point in the garage to the line through the house door, keeping clear of the desks. */
+  toHouse(p) {
+    if (openFloor(p)) return [new THREE.Vector3(p.x, 0, DOOR.z)];
+    return [...this.toAisle(p), HUB.clone()];
+  }
+
+  /**
+   * From a point in the garage out to the side aisle along the lane it's on,
+   * keeping clear of the desks, and if `to` is in the garage too, back in
+   * along its lane (or just along the one lane, if it's the same).
+   */
+  toAisle(p, to = null) {
+    const out = openFloor(p) ? [] : [new THREE.Vector3(p.x, 0, nearestLane(p))];
+    if (to && !openFloor(to) && out.length && nearestLane(to) === out[0].z) return [...out, new THREE.Vector3(to.x, 0, out[0].z)];
+    if (out.length) out.push(new THREE.Vector3(SIDE_AISLE_X, 0, out[0].z));
+    if (to && !openFloor(to)) out.push(new THREE.Vector3(SIDE_AISLE_X, 0, nearestLane(to)), new THREE.Vector3(to.x, 0, nearestLane(to)));
+    return out;
+  }
+
+  /** The corners of the way through the house between two points on it (as `wayAt` measures them). */
+  alongWay(from, to) {
+    const out = [];
+    if (from < to) for (let k = Math.floor(from) + 1; k < to; k++) out.push(this.way[k].clone());
+    else for (let k = Math.ceil(from) - 1; k > to; k--) out.push(this.way[k].clone());
+    return out;
+  }
+
+  /** An agent walking by: the living room's door opens for it. */
+  passing(p) {
+    if (Math.abs(p.x - LIVING_ROOM.minX) < 1.4 && Math.abs(p.z - DOOR.z) < 1.2) this.room.living.holdDoor();
+  }
+
   /** `camera` is where you're looking from (the living room's door opens for you). */
   update(dt, t, now, camera) {
     this.room.update(dt, t, camera);
@@ -101,4 +176,19 @@ export class World {
     this.effects.update(dt);
     for (const d of this.desks) d.update(dt, t, now);
   }
+}
+
+/** Right of the desks, the garage is open floor. */
+function openFloor(p) {
+  return p.x >= SIDE_AISLE_X - 0.2;
+}
+
+function nearestLane(p) {
+  return LANES.reduce((a, b) => (Math.abs(b - p.z) < Math.abs(a - p.z) ? b : a));
+}
+
+/** How far along a polyline `p` is, nearest: the index of its corner before, plus how far to the next. */
+function wayAt(way, p) {
+  const { k, t } = nearestOnPath(way, p);
+  return k + t;
 }

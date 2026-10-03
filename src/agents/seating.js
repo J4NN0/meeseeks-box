@@ -8,6 +8,8 @@ import { DESK_COUNT } from '../world/index.js';
 // then working ones, then nappers. Agents only move when someone clearly more
 // important (a better tier, not just more recent) is stuck deeper down, and
 // never before they've been somewhere for MIN_STAY_MS, so nobody ping-pongs.
+// Nobody moves at all while `hold` is on (during a meeting): newcomers still
+// get the first free desk.
 
 export const CAPACITY = DESK_COUNT;
 const MIN_STAY_MS = 20_000;
@@ -32,6 +34,7 @@ export class Seating {
   constructor() {
     /** id -> { session, level, since, missingSince } */
     this.seats = new Map();
+    this.hold = false;
   }
 
   /**
@@ -58,7 +61,7 @@ export class Seating {
 
     const fresh = sessions.filter((s) => !this.seats.has(s.id)).sort(compare);
     for (const session of fresh) this.seats.set(session.id, { session, level: this.firstFree(), since: now, missingSince: 0 });
-    this.rebalance(now);
+    if (!this.hold) this.rebalance(now);
 
     const levels = [[]];
     const moves = new Map();

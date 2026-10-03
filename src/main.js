@@ -109,6 +109,7 @@ const hud = new Hud({
     multiverse.setMode(m);
   },
   onWalk: () => (view === 'walk' ? walker.lock() : enterWalk()),
+  onMeeting: () => toggleMeeting(),
   onReset: () => (view === 'walk' ? exitWalk() : unfocus()),
   onClosePanel: () => closePanel(),
   onGoToAgent: (id) => act({ kind: 'agent', agentId: id }),
@@ -184,9 +185,13 @@ function focusAgent(agent) {
 }
 
 // The wall boards: in the overview, the first click flies up to one; after
-// that its items are clickable. Walking, you just aim and click.
+// that its items are clickable. Walking, you just aim and click. The meeting
+// room's floating screens work the same.
 let focusedBoard = null;
-const boardFaces = () => [here().world.room.tvScreen, here().world.room.wbFace];
+const boardFaces = () => {
+  const { room } = here().world;
+  return [room.tvScreen, room.wbFace, ...room.living.meeting.calls.faces()];
+};
 
 /**
  * Where to stand to read a board: square on, far enough to fit it. With the
@@ -266,6 +271,38 @@ function act(action) {
     watchTv();
   } else if (action.kind === 'tv') {
     watchTv();
+  } else if (action.kind === 'meeting') {
+    toggleMeeting();
+  }
+}
+
+/**
+ * The meeting bell (or the HUD button, or M): everyone, wherever they are,
+ * to the meeting room, or back to their desks. In the overview, fly over to
+ * watch them come in.
+ */
+function toggleMeeting() {
+  if (traveling) return;
+  const on = !multiverse.meeting;
+  const { meeting } = here().world.room.living;
+  multiverse.setMeeting(on);
+  meeting.bell.ring();
+  hud.setMeeting(on);
+  // Only so many universes fit on screen; the toast names those.
+  const calls = meeting.calls.set(multiverse.calls(Date.now()), Date.now());
+  if (on) {
+    const remote = calls.map((c) => `the ${c.name}`);
+    hud.toast(`📣 Meeting! Everyone to the meeting room.${remote.length ? ` ${remote.join(' and ')} join${remote.length > 1 ? '' : 's'} on screen.` : ''}`);
+    if (view === 'orbit') {
+      focused = null;
+      leaveBoard();
+      hud.hidePanel();
+      flyTo(meeting.view.eye.clone(), meeting.view.look.clone(), { duration: 1.4 });
+    }
+  } else {
+    hud.toast('👋 Meeting\'s over: back to work, everyone!');
+    // Looking at a screen that's going away: back out.
+    if (focusedBoard && meeting.calls.faces().some((f) => f.userData.board === focusedBoard)) unfocus();
   }
 }
 
@@ -576,6 +613,7 @@ function pick(ndc, maxDistance = Infinity) {
     if (d.car) return { car: true, action: { id: 'car', kind: 'hood', label: 'Car' } };
     if (d.remote) return { remote: true, action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
     if (d.livingTv) return { tv: true, action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
+    if (d.meetingBell) return { bell: true, action: { id: 'bell', kind: 'meeting', label: multiverse.meeting ? 'Meeting bell\nring to send everyone back to work' : 'Meeting bell\nring to call everyone to the meeting room' } };
     if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
     if (hit.object.isMesh && !hit.object.material.transparent) return null;
   }
@@ -618,7 +656,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     // A board's items only react once you've flown up to it.
     if (target?.board && target.board !== focusedBoard) target.action = null;
     setPointed(target);
-    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv));
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv || target?.bell));
     pendingMove = null;
   });
   pendingMove = e;
@@ -658,6 +696,7 @@ window.addEventListener('keydown', (e) => {
     else if (hud.panelOpen) { focused = null; hud.hidePanel(); syncWalkHud(); }
   }
   if (e.code === 'KeyF' && view === 'orbit') enterWalk();
+  if (e.code === 'KeyM' && !e.repeat) toggleMeeting();
   if (e.code === 'KeyO') view === 'walk' ? exitWalk() : unfocus();
 });
 
@@ -735,6 +774,7 @@ renderer.setAnimationLoop((timestamp) => {
     slowTimer = 0.5;
     const agents = multiverse.roster(now);
     dashboard.draw(agents, now, { offline: feed.state === 'offline', today: today.data });
+    here().world.room.living.meeting.calls.set(multiverse.calls(now), now);
     whiteboard.draw(today.data, agents, now);
     hud.update(agents, feed.state, now, today.data);
   }

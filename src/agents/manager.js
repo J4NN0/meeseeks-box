@@ -3,8 +3,11 @@ import { Agent } from './agent.js';
 // Keeps one office in sync with the sessions seated in it: new sessions
 // spawn an agent, vanished ones poof. The multiverse decides who sits where
 // (and smooths over flaky polls), so whatever isn't in the list leaves now.
+// During a meeting everyone here goes to the meeting room, newcomers too.
 
 const SPAWN_STAGGER_S = 1.3;
+/** Called to (or out of) a meeting, they get up one after another, this far apart. */
+const MEETING_STAGGER_S = 0.28;
 
 export class AgentManager {
   constructor(world, { onClick } = {}) {
@@ -14,6 +17,42 @@ export class AgentManager {
     this.onClick = onClick;
     this.queue = [];
     this.spawnCooldown = 0;
+    this.meeting = false;
+  }
+
+  /**
+   * Calls everyone to the meeting room, or sends them back to their desks.
+   * `instant` puts them straight there (an office you aren't looking at).
+   */
+  setMeeting(on, { instant = false } = {}) {
+    this.meeting = on;
+    if (instant) {
+      this.settleMeeting();
+      return;
+    }
+    let i = 0;
+    for (const agent of this.agents.values()) agent.cue = i++ * MEETING_STAGGER_S + Math.random() * 0.2;
+  }
+
+  /** Everyone who's on the way to or from the meeting gets there now. */
+  settleMeeting() {
+    for (const agent of this.agents.values()) {
+      if (agent.phase === 'rising') agent.stoodUp();
+      if (this.meeting && agent.canJoin) this.join(agent, true);
+      else if (this.meeting && agent.inMeeting && agent.phase !== 'meeting') agent.takePlace();
+      else if (!this.meeting && agent.inMeeting) agent.leaveMeeting({ instant: true });
+      else if (agent.returning) agent.settle(Date.now());
+    }
+  }
+
+  join(agent, instant = false) {
+    agent.joinMeeting(this.world.claimMeetingPlace(agent), { instant });
+  }
+
+  /** Someone's still in the meeting room, or on the way back from it. */
+  get busy() {
+    for (const agent of this.agents.values()) if (agent.place || agent.returning) return true;
+    return false;
   }
 
   /**
@@ -56,6 +95,8 @@ export class AgentManager {
   spawn(session, now, opts) {
     const agent = new Agent(session, this.world, { mode: this.mode, onClick: this.onClick, now, ...opts });
     this.agents.set(session.id, agent);
+    // Built mid-meeting while you weren't looking: it's already in there.
+    if (opts?.instant && this.meeting) this.join(agent, true);
     return agent;
   }
 
@@ -73,8 +114,16 @@ export class AgentManager {
       this.spawnCooldown = SPAWN_STAGGER_S;
     }
     for (const [id, agent] of this.agents) {
+      if (this.meeting ? agent.canJoin : agent.inMeeting) {
+        agent.cue -= dt;
+        if (agent.cue <= 0) {
+          if (this.meeting) this.join(agent);
+          else agent.leaveMeeting();
+        }
+      }
       agent.tick(dt, t, now, camera);
       if (agent.phase === 'gone') this.agents.delete(id);
+      else if (agent.phase === 'walking' || agent.phase === 'convening' || agent.phase === 'departing') this.world.passing(agent.character.root.position);
     }
     const lounger = [...this.agents.values()].find((a) => a.phase === 'lounging');
     const desk = lounger && this.world.fillOrder.find((d) => d.free);
