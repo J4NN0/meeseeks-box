@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { box, mesh, ownToon, rng, sphere, toon } from '../../../engine/toon.js';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { canvasTexture } from '../../screens.js';
+import { peg, rod } from '../hanging.js';
 
 // The Mask of Loki (The Mask, 1994): the weathered wooden mask Stanley
 // fishes out of the river, all green-grey driftwood grain. Almond eye holes,
@@ -42,21 +43,13 @@ export function createLokiMask({ mount = 'stand' } = {}) {
 /** Flat on the board, its rim just touching, hung by a cord over a peg. */
 function hang(g, mask) {
   mask.position.z = 0.008;
-  const peg = new THREE.Vector3(0, H / 2 + 0.03, 0.026);
-  const iron = toon('#8b8f95');
-  g.add(rod(new THREE.Vector3(peg.x, peg.y, 0), peg, 0.0035, iron));
-  g.add(sphere(0.005, iron, 10).translateY(peg.y).translateZ(peg.z));
+  const hole = new THREE.Vector3(0, H / 2 + 0.03, 0);
+  const tip = hole.clone().setZ(0.026);
+  g.add(peg(hole.x, hole.y, tip.z));
   // The cord, down to the back of the mask's top corners.
   const cord = toon('#3b2a1e');
-  for (const side of [-1, 1]) g.add(rod(peg, new THREE.Vector3(side * 0.06, H * 0.43, 0.012), 0.0013, cord));
-}
-
-/** A thin round rod from `a` to `b`. */
-function rod(a, b, radius, material) {
-  const m = mesh(new THREE.CylinderGeometry(radius, radius, a.distanceTo(b), 8), material);
-  m.position.addVectors(a, b).multiplyScalar(0.5);
-  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
-  return m;
+  for (const side of [-1, 1]) g.add(rod(tip, new THREE.Vector3(side * 0.06, H * 0.43, 0.012), 0.0013, cord));
+  g.userData.hole = hole;
 }
 
 // The face, in u (-1 left to 1 right) and v (-1 chin to 1 top) ------------
