@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PALETTE, box, cyl, glow, mesh, noInk, ownToon, rng, sphere, toon } from '../engine/toon.js';
 import { createPortal } from './portal.js';
+import { createChristmasLights } from './christmas-lights.js';
 import { CAR, HULL, HULL_Y, carColliders, hullGeometry } from './car.js';
 import { canvasTexture, glowTexture, labelTexture, neonSignTexture } from './screens.js';
 import { addCollection } from './props/index.js';
@@ -109,7 +110,17 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   solidCircle(-3.55, -5.45, 0.32);
   solidCircle(7.35, 5.2, 0.32);
   solidCircle(-7.35, -5.5, 0.32);
-  room.add(stringLights());
+  // Just clear of the neon sign; the switch sits between the shelves and the fridge.
+  const lights = createChristmasLights({
+    runs: [
+      { from: new THREE.Vector3(-7.9, 3.52, -5.95), to: new THREE.Vector3(2.4, 3.52, -5.95), inward: new THREE.Vector3(0, 0, 1) },
+      { from: new THREE.Vector3(-7.95, 3.52, -5.9), to: new THREE.Vector3(-7.95, 3.52, 4.6), inward: new THREE.Vector3(1, 0, 0) },
+    ],
+    plug: new THREE.Vector3(-8, 1.3, 4.6),
+    plugFacing: new THREE.Vector3(1, 0, 0),
+  });
+  room.add(lights.group);
+  updaters.push(lights.update);
 
   // Left wall: workbench, portal, Andúril, shelves, fridge ----------------
   const bench = workbench(-7.45, -3.9);
@@ -369,35 +380,6 @@ function plant(x, z, h, seed) {
     leaf.rotation.set(0.3, a, 0.4);
     stem.add(leaf);
     g.add(stem);
-  }
-  return g;
-}
-
-function stringLights() {
-  const g = new THREE.Group();
-  const runs = [
-    [new THREE.Vector3(-7.95, 3.35, -5.95), new THREE.Vector3(2.4, 3.35, -5.95)],
-    [new THREE.Vector3(-7.95, 3.35, -5.95), new THREE.Vector3(-7.95, 3.35, 5.5)],
-  ];
-  const colors = ['#ffd166', '#ff7eb6', '#7ae582', '#6ec6ee'];
-  let k = 0;
-  for (const [a, b] of runs) {
-    const pts = [];
-    const sags = Math.round(a.distanceTo(b) / 2.2);
-    for (let i = 0; i <= sags * 8; i++) {
-      const f = i / (sags * 8);
-      const p = a.clone().lerp(b, f);
-      p.y -= Math.sin(((f * sags) % 1) * Math.PI) * 0.22;
-      p.addScaledVector(new THREE.Vector3(b.z === a.z ? 0 : 1, 0, b.z === a.z ? 1 : 0), 0.05);
-      pts.push(p);
-    }
-    const curve = new THREE.CatmullRomCurve3(pts);
-    g.add(mesh(new THREE.TubeGeometry(curve, pts.length * 2, 0.008, 4), toon('#333'), { cast: false }));
-    for (let i = 0; i < pts.length; i += 4) {
-      const bulb = sphere(0.045, glow(colors[k++ % colors.length]), 10, { cast: false });
-      bulb.position.copy(pts[i]).add(new THREE.Vector3(0, -0.05, 0));
-      g.add(bulb);
-    }
   }
   return g;
 }

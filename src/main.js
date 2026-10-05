@@ -11,6 +11,7 @@ import { Walker, EYE_HEIGHT } from './engine/walker.js';
 import { SITE, WALK_BOUNDS, PORTAL } from './world/room.js';
 import { Multiverse } from './multiverse.js';
 import { verse } from './world/verses.js';
+import { christmasLightsOn, setChristmasLights } from './world/christmas-lights.js';
 import { CAPACITY } from './agents/seating.js';
 import { MissionControl } from './world/mission-control.js';
 import { RecapBoard } from './world/recap-board.js';
@@ -74,6 +75,7 @@ const whiteboard = new RecapBoard();
 const feed = new Feed();
 const today = new TodayFeed();
 dashboard.setProvider(store.get('limits', 'claude'));
+setChristmasLights(store.get('lights', 'on') === 'on');
 let mode = CONFIG.mascots || store.get('mascots', 'meeseeks');
 if (!MASCOT_MODES[mode]) mode = 'meeseeks';
 const bootAt = performance.now();
@@ -273,6 +275,9 @@ function act(action) {
     watchTv();
   } else if (action.kind === 'meeting') {
     toggleMeeting();
+  } else if (action.kind === 'lights') {
+    setChristmasLights(!christmasLightsOn());
+    store.set('lights', christmasLightsOn() ? 'on' : 'off');
   }
 }
 
@@ -614,6 +619,7 @@ function pick(ndc, maxDistance = Infinity) {
     if (d.remote) return { remote: true, action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
     if (d.livingTv) return { tv: true, action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
     if (d.meetingBell) return { bell: true, action: { id: 'bell', kind: 'meeting', label: multiverse.meeting ? 'Meeting bell\nring to send everyone back to work' : 'Meeting bell\nring to call everyone to the meeting room' } };
+    if (d.christmasLights) return { lights: true, action: { id: 'lights', kind: 'lights', label: `Christmas lights · ${christmasLightsOn() ? 'on' : 'off'}` } };
     if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
     if (hit.object.isMesh && !hit.object.material.transparent) return null;
   }
@@ -656,7 +662,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     // A board's items only react once you've flown up to it.
     if (target?.board && target.board !== focusedBoard) target.action = null;
     setPointed(target);
-    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv || target?.bell));
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv || target?.bell || target?.lights));
     pendingMove = null;
   });
   pendingMove = e;
