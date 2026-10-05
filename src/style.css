@@ -109,21 +109,6 @@ html, body {
 .count i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
 
 
-.legend {
-  left: 16px; bottom: 16px;
-  display: grid; gap: 4px;
-  padding: 10px 14px;
-  font: 700 13px Nunito, system-ui;
-  background: rgba(10, 12, 20, 0.66);
-  border: 1.5px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  backdrop-filter: blur(6px);
-}
-.legend > div { display: flex; align-items: center; gap: 8px; }
-.legend i { width: 14px; height: 14px; border-radius: 5px; background: var(--c); border: 2px solid var(--ink); }
-.legend i.st { border-radius: 50%; box-shadow: 0 0 6px var(--c); border: none; width: 10px; height: 10px; margin: 0 2px; }
-.legend hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 3px 0; width: 100%; }
-
 .empty {
   left: 50%; bottom: 22px;
   transform: translateX(-50%);
@@ -146,8 +131,7 @@ html, body {
 
 .labels { pointer-events: none; transition: opacity 0.3s; }
 /* Up close to a wall board, agent tags would float over it. */
-body.board-focus .labels,
-body.board-focus .legend { opacity: 0; pointer-events: none; }
+body.board-focus .labels { opacity: 0; pointer-events: none; }
 
 .agent-tag {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -537,7 +521,6 @@ kbd {
 .controls button { display: inline-flex; align-items: center; gap: 6px; line-height: 20px; }
 .controls button kbd { margin: 0; }
 
-body.walking .legend { display: none; }
 body.walking.locked .hud-top .controls { opacity: 0.35; }
 
 .portal-flash {
@@ -625,7 +608,6 @@ body[data-verse='3'] #stars { filter: hue-rotate(240deg); }
 @keyframes vortex { to { transform: rotate(360deg); } }
 
 @media (max-width: 760px) {
-  .legend { display: none; }
   .hud-top { flex-direction: column; }
   .controls { justify-content: flex-start; }
 }

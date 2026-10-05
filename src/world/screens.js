@@ -163,7 +163,7 @@ export class TerminalScreen {
 
 // ---------------------------------------------------------------- neon sign
 
-export function neonSignTexture({ title = 'MEESEEKS BOX', sub = '✦ existence is pain · we are hiring ✦', glow = ['#ff4fa3', '#ff79b8'], core = '#ffe3f1' } = {}) {
+export function neonSignTexture({ title = 'MEESEEKS BOX', sub = '✦ Existence is pain! ✦', glow = ['#ff4fa3', '#ff79b8'], core = '#ffe3f1' } = {}) {
   const { canvas, ctx, texture } = canvasTexture(1024, 300);
   const draw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);

@@ -1,5 +1,5 @@
 import { MASCOT_MODES, agentColor } from '../characters/index.js';
-import { LEGEND_PROVIDERS, STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo, testSummary } from '../status.js';
+import { STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo, testSummary } from '../status.js';
 import { Talk } from './talk.js';
 import { copyFrom, esc, shellQuote } from './util.js';
 
@@ -9,12 +9,6 @@ const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k
 const KIND_NAMES = { meeseeks: 'A Meeseeks', clawd: 'Clawd', butterbot: 'A Butter Bot' };
 /** The agent panel's tabs, the chat first. */
 const TABS = [['chat', '💬 Chat'], ['activity', '📜 Activity'], ['details', '🔎 Details']];
-const LEGEND_STATUSES = [
-  ['working', 'Working'],
-  ['waiting', 'Waiting on you'],
-  ['stressed', 'Long turn (existence is pain)'],
-  ['sleeping', 'Napping (idle)'],
-];
 
 export class Hud {
   constructor({ mode, onModeChange, onWalk, onMeeting, onReset, onClosePanel, onGoToAgent, onVerse }) {
@@ -30,11 +24,6 @@ export class Hud {
     this.meetingBtn.addEventListener('click', () => onMeeting());
     $('reset-view').addEventListener('click', () => onReset());
     $('panel-close').addEventListener('click', () => onClosePanel());
-    $('legend').innerHTML = [
-      ...LEGEND_PROVIDERS.map((p) => `<div><i style="--c: ${providerInfo(p).color}"></i>${esc(providerInfo(p).name)}</div>`),
-      '<hr />',
-      ...LEGEND_STATUSES.map(([s, label]) => `<div><i class="st" style="--c: ${STATUS_COLORS[s]}"></i>${esc(label)}</div>`),
-    ].join('');
 
     this.verses = $('verses');
     this.versesKey = '';

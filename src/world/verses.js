@@ -10,7 +10,7 @@ const GARAGE = {
   wallDark: PALETTE.wallDark,
   wallTrim: PALETTE.wallTrim,
   sky: '#fff8ea',
-  sign: { title: 'MEESEEKS BOX', sub: '✦ existence is pain · we are hiring ✦', glow: ['#ff4fa3', '#ff79b8'], core: '#ffe3f1' },
+  sign: { title: 'MEESEEKS BOX', sub: '✦ Existence is pain! ✦', glow: ['#ff4fa3', '#ff79b8'], core: '#ffe3f1' },
   neon: '#ff5fa2',
 };
 

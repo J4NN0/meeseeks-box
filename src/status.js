@@ -28,15 +28,14 @@ export function visualStatus(session, now) {
 /** Which speech-bubble situation (see agents/lines.js) a status maps to. */
 export const STATUS_SITUATIONS = { working: 'work', stressed: 'stress', waiting: 'wait', sleeping: 'sleep' };
 
-// `color` is the agent colour family (legend), `bar`/`text` the monitor title bar.
+// `bar`/`text` colour the monitor title bar.
 const PROVIDERS = {
-  claude: { name: 'Claude Code', glyph: '✻', color: '#e0875f', bar: '#d97757', text: '#fff6f0' },
-  codex: { name: 'Codex', glyph: '>_', color: '#6ec6ee', bar: '#e9eef5', text: '#15181d' },
-  other: { name: 'Agent', glyph: '◉', color: '#8fd18a', bar: '#6ec6ee', text: '#0d2230' },
+  claude: { name: 'Claude Code', glyph: '✻', bar: '#d97757', text: '#fff6f0' },
+  codex: { name: 'Codex', glyph: '>_', bar: '#e9eef5', text: '#15181d' },
+  other: { name: 'Agent', glyph: '◉', bar: '#6ec6ee', text: '#0d2230' },
 };
 
 export function providerInfo(p) { return PROVIDERS[p] || PROVIDERS.other; }
-export const LEGEND_PROVIDERS = ['claude', 'codex'];
 
 /** When the current status started: the turn while working, else the last change. */
 export function statusSince(session, status) {
