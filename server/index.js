@@ -1,5 +1,6 @@
 // Standalone server for the built app: serves dist/ and the session API.
-// Binds to localhost only, since the API exposes snippets of your transcripts.
+// Binds to localhost only, since the API exposes your transcripts and can
+// prompt your agents (api.js also checks requests come from our own page).
 
 import http from 'node:http';
 import fsp from 'node:fs/promises';

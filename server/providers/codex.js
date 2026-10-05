@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { chatSummary, newChat, noteAgent, noteStep, noteYou } from '../chat.js';
 import { follow } from '../follow.js';
 import { addTokens, endTurn, isTestCommand, journalSummary, newJournal, noteEdit, noteTest, promptTurn, startTurn, touchTurn } from '../journal.js';
 import { MAX_ACTIVITY, MIN, SLEEP_AFTER_MS, base, clip, envNumber, ms, pruneMap, pushActivity, readHead, sessionStatus } from '../util.js';
@@ -75,7 +76,7 @@ function contentText(content) {
 
 export const codexReducer = {
   init: () => ({
-    activity: [], helpers: new Set(), tests: new Map(), journal: newJournal(), busy: false, turnStartedAt: 0, lastAt: 0,
+    activity: [], helpers: new Set(), tests: new Map(), journal: newJournal(), chat: newChat(), busy: false, turnStartedAt: 0, lastAt: 0,
     model: '', context: 0, total: 0, lastTotal: null, firstPrompt: '', branch: '', lastSay: null, limits: null,
   }),
 
@@ -119,10 +120,12 @@ export const codexReducer = {
         if (p.role === 'user') {
           st.firstPrompt ||= text;
           promptTurn(j, ts, text);
+          noteYou(st.chat, ts, text);
           pushActivity(st.activity, { ts, kind: 'prompt', icon: '🧑', text: clip(text, 160) });
         } else if (p.role === 'assistant') {
           touchTurn(j, ts);
           st.lastSay = { ts, text: clip(text, 400) };
+          noteAgent(st.chat, ts, text);
           pushActivity(st.activity, { ts, kind: 'say', icon: '💬', text: clip(text, 160) });
         }
       } else if (p.type === 'reasoning') {
@@ -134,8 +137,10 @@ export const codexReducer = {
         const raw = rawArgs(args);
         touchTurn(j, ts);
         if (name === 'spawn_agent') st.helpers.add(p.call_id || ts);
-        for (const m of raw.matchAll(PATCH_FILE)) noteEdit(j, m[2].trim(), ts);
         const cmd = commandOf(raw);
+        const files = [...raw.matchAll(PATCH_FILE)].map((m) => m[2].trim());
+        for (const file of files) noteEdit(j, file, ts);
+        noteStep(st.chat, ts, { files, command: !!cmd });
         if (p.call_id && isTestCommand(cmd)) st.tests.set(p.call_id, cmd);
         pushActivity(st.activity, { ts, kind: 'tool', tool: name, ...describeCall(name, args) });
       } else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output' || p.type === 'local_shell_call_output') {
@@ -175,6 +180,7 @@ export const codexReducer = {
     limits: st.limits,
     activity: st.activity.slice(-MAX_ACTIVITY),
     journal: st.journal,
+    chat: chatSummary(st.chat),
   }),
 };
 
@@ -285,6 +291,7 @@ export async function scanCodex(now) {
       lastMessage: info.lastMessage || null,
       ask: null,
       activity: info.activity || [],
+      chat: info.chat || [],
     });
   }
   return sessions;

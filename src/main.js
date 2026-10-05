@@ -689,6 +689,11 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 });
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey) return;
+  // Typing a prompt in the panel: keys are text, and Esc just stops typing.
+  if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
   if (e.key === 'Escape') {
     // With nothing open, Esc climbs back out of the battery.
     if (view === 'orbit' && !hud.panelOpen && !focusedBoard && here().level > 0) travelTo(Math.min(here().level, multiverse.needed) - 1);
@@ -786,7 +791,7 @@ renderer.setAnimationLoop((timestamp) => {
 // Handy for poking at things from the console while developing.
 if (import.meta.env.DEV) {
   window.meeseeks = {
-    camera, controls, multiverse, dashboard, whiteboard, feed, today, ink, walker, enterWalk, exitWalk, focusBoard, act, pick, travelTo,
+    camera, controls, multiverse, dashboard, whiteboard, feed, today, ink, walker, hud, enterWalk, exitWalk, focusAgent, focusBoard, act, pick, travelTo,
     get scene() { return here().scene; },
     get world() { return here().world; },
     get manager() { return here().manager; },

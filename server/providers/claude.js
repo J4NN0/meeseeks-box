@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { channelMessage, chatSummary, newChat, noteAgent, noteStep, noteYou } from '../chat.js';
 import { follow } from '../follow.js';
 import { addTokens, endTurn, isTestCommand, journalSummary, newJournal, noteEdit, noteRecap, noteTest, startTurn, touchTurn } from '../journal.js';
 import { MAX_ACTIVITY, base, clip, grab, ms, pruneMap, pushActivity, sessionStatus } from '../util.js';
@@ -68,7 +69,7 @@ function askOf(name, input = {}) {
 
 export const claudeReducer = {
   init: () => ({
-    activity: [], pending: new Map(), tests: new Map(), usageIds: [], journal: newJournal(),
+    activity: [], pending: new Map(), tests: new Map(), usageIds: [], journal: newJournal(), chat: newChat(),
     title: '', lastPrompt: '', model: '', branch: '', cwd: '', lastSay: null,
     turnStartedAt: 0, lastAt: 0, context: 0, outTokens: 0,
   }),
@@ -105,11 +106,15 @@ export const claudeReducer = {
           }
         }
       }
-      const text = userText(c).trim();
-      if (text && !r.isMeta && !r.isCompactSummary) {
+      const raw = userText(c).trim();
+      if (raw && !r.isMeta && !r.isCompactSummary) {
+        // A prompt sent from the box (or another channel) arrives wrapped.
+        const pushed = channelMessage(raw);
+        const text = pushed?.text || raw;
         st.turnStartedAt = ts || st.turnStartedAt;
         startTurn(j, ts, text);
-        pushActivity(st.activity, { ts, kind: 'prompt', icon: '🧑', text: clip(text, 160) });
+        noteYou(st.chat, ts, text, pushed?.source);
+        pushActivity(st.activity, { ts, kind: 'prompt', icon: pushed ? '📦' : '🧑', text: clip(text, 160) });
       } else if (textParts(c).some((t) => t.trimStart().startsWith('<task-notification'))) {
         startTurn(j, ts, '🔔 A background task reported back');
       }
@@ -136,11 +141,14 @@ export const claudeReducer = {
         if (part.type === 'thinking') pushActivity(st.activity, { ts, kind: 'think', icon: '🤔', text: 'Thinking…' });
         else if (part.type === 'text' && part.text?.trim()) {
           st.lastSay = { ts, text: clip(part.text, 400) };
+          noteAgent(st.chat, ts, part.text);
           pushActivity(st.activity, { ts, kind: 'say', icon: '💬', text: clip(part.text, 160) });
         } else if (part.type === 'tool_use') {
           const input = part.input || {};
           st.pending.set(part.id, { name: part.name, ...askOf(part.name, input) });
-          if (EDIT_TOOLS.has(part.name)) noteEdit(j, input.file_path || input.notebook_path, ts);
+          const file = EDIT_TOOLS.has(part.name) ? input.file_path || input.notebook_path : '';
+          if (file) noteEdit(j, file, ts);
+          noteStep(st.chat, ts, { files: file ? [file] : [], command: part.name === 'Bash' });
           if (part.name === 'Bash' && isTestCommand(input.command)) st.tests.set(part.id, input.command);
           pushActivity(st.activity, { ts, kind: 'tool', tool: part.name, ...describeTool(part.name, input) });
         }
@@ -188,6 +196,7 @@ export const claudeReducer = {
       ask: ask ? { kind: ask.kind, text: ask.text } : null,
       activity: st.activity.slice(-MAX_ACTIVITY),
       journal: st.journal,
+      chat: chatSummary(st.chat),
     };
   },
 };
@@ -272,6 +281,7 @@ export async function scanClaude(now) {
       statusSince: reg.statusUpdatedAt || lastAt,
       turnStartedAt: busy ? info.turnStartedAt || reg.statusUpdatedAt || 0 : 0,
       lastActivityAt: lastAt,
+      transcriptAt: info.lastAt || 0,
       contextTokens: info.context || 0,
       outputTokens: info.outTokens || 0,
       helpers: busy ? info.helpers || 0 : 0,
@@ -280,6 +290,7 @@ export async function scanClaude(now) {
       lastMessage: info.lastMessage || null,
       ask: busy ? null : info.ask || null,
       activity: info.activity || [],
+      chat: info.chat || [],
     });
   }
   pruneMap(transcriptPaths, seenIds);

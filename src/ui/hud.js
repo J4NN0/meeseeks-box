@@ -1,11 +1,14 @@
 import { MASCOT_MODES, agentColor } from '../characters/index.js';
 import { LEGEND_PROVIDERS, STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo, testSummary } from '../status.js';
+import { Talk } from './talk.js';
+import { copyFrom, esc, shellQuote } from './util.js';
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : String(n || 0));
 
 const KIND_NAMES = { meeseeks: 'A Meeseeks', clawd: 'Clawd', butterbot: 'A Butter Bot' };
+/** The agent panel's tabs, the chat first. */
+const TABS = [['chat', '💬 Chat'], ['activity', '📜 Activity'], ['details', '🔎 Details']];
 const LEGEND_STATUSES = [
   ['working', 'Working'],
   ['waiting', 'Waiting on you'],
@@ -47,6 +50,8 @@ export class Hud {
     this.today = null;
     this.agents = [];
     this.panelKey = '';
+    this.talk = new Talk();
+    this.tab = 'chat';
     this.onGoToAgent = onGoToAgent;
     // One listener for the project panel's buttons, which are rebuilt often.
     this.panelBody.addEventListener('click', (e) => {
@@ -151,7 +156,32 @@ export class Hud {
     this.project = null;
     this.panelKey = '';
     this.panel.hidden = false;
+    this.agentKeys = {};
+    // Built once per agent; each part is refreshed on its own, so a reply
+    // arriving doesn't wipe what you're typing.
+    this.panelBody.innerHTML = `
+      <header class="agent-head"></header>
+      <nav class="tabs" role="tablist">
+        ${TABS.map(([id, label]) => `<button type="button" role="tab" data-tab="${id}">${label}</button>`).join('')}
+      </nav>
+      <section class="tab chat" data-tab="chat"></section>
+      <section class="tab activity" data-tab="activity"><ol></ol></section>
+      <section class="tab details" data-tab="details"></section>`;
+    for (const btn of this.panelBody.querySelectorAll('[role=tab]')) btn.addEventListener('click', () => this.setTab(btn.dataset.tab));
+    this.talk.mount(this.panelBody.querySelector('.tab.chat'), agent);
+    this.setTab(this.tab);
     this.renderPanel(Date.now());
+  }
+
+  setTab(id) {
+    this.tab = id;
+    for (const el of this.panelBody.querySelectorAll('[data-tab]')) {
+      const on = el.dataset.tab === id;
+      if (el.getAttribute('role') === 'tab') el.setAttribute('aria-selected', String(on));
+      else el.hidden = !on;
+    }
+    this.talk.visible = id === 'chat';
+    if (id === 'chat') this.talk.update(Date.now());
   }
 
   /** Today's recap for one project; `focus` highlights a session or one of its turns. */
@@ -173,16 +203,34 @@ export class Hud {
     const a = this.selected;
     if (!a) return;
     const s = a.session;
-    // Rebuild only when content changes: replacing the DOM every tick would
-    // swallow clicks and clear text selection. Times are refreshed in place.
-    const key = `${s.id}:${a.visualStatus}:${s.activity.length}:${s.activity.at(-1)?.ts}:${a.phase}:${s.startedAt}:${s.turnStartedAt}:${s.contextTokens}:${s.helpers}:${s.title}:${s.branch}:${s.model}`;
-    if (key === this.panelKey) {
-      this.updateTimes(now);
-      return;
-    }
-    this.panelKey = key;
+    // Each part is rebuilt only when its content changes: replacing the DOM
+    // every tick would swallow clicks and clear text selection. Times are
+    // refreshed in place.
+    const changed = (part, key) => {
+      if (this.agentKeys[part] === key) return false;
+      this.agentKeys[part] = key;
+      return true;
+    };
     const p = providerInfo(s.provider);
     const rawId = s.id.split(':').slice(1).join(':');
+    this.panel.style.setProperty('--agent', a.colorHex);
+    this.panel.style.setProperty('--status', STATUS_COLORS[a.visualStatus] || '#999');
+
+    if (changed('head', `${s.id}:${a.visualStatus}:${s.title}:${a.kind}`)) {
+      this.panelBody.querySelector('.agent-head').innerHTML = `
+        <span class="provider"><i></i>${esc(p.name)} · ${esc(KIND_NAMES[a.kind] || '')}</span>
+        <h2>${esc(s.title)}</h2>
+        <span class="status">${esc(STATUS_LABELS[a.visualStatus] || a.visualStatus)}</span>`;
+    }
+
+    this.talk.update(now);
+
+    if (changed('activity', `${s.id}:${s.activity.length}:${s.activity.at(-1)?.ts}`)) {
+      const items = [...s.activity].reverse().map((e) => `
+        <li data-kind="${esc(e.kind)}"><span>${esc(e.icon || '•')}</span><span>${esc(e.text)}${e.cmd && e.cmd !== e.text ? `<br><code>${esc(e.cmd)}</code>` : ''}</span><time${e.ts ? ` data-ts="${e.ts}"` : ''}>${e.ts ? ago(now - e.ts) : ''}</time></li>`).join('');
+      this.panelBody.querySelector('.tab.activity ol').innerHTML = items || '<li><span>🫥</span><span>Nothing yet.</span><time></time></li>';
+    }
+
     const resume = s.provider === 'claude' ? `cd ${shellQuote(s.cwd)} && claude --resume ${rawId}` : s.provider === 'codex' ? `codex resume ${rawId}` : '';
     const rows = [
       ['Project', s.project],
@@ -196,41 +244,17 @@ export class Hud {
       ['Context', s.contextTokens ? `${tokens(s.contextTokens)} tokens` : ''],
       ['Helpers', s.helpers ? `${s.helpers} subagent${s.helpers > 1 ? 's' : ''}` : ''],
       ['Client', [s.entrypoint, s.version].filter(Boolean).join(' · ')],
+      ['Box channel', s.provider !== 'claude' ? '' : s.talk?.enabled ? 'connected' : s.talk ? 'switched off' : 'not connected'],
     ].filter(([, v]) => v !== undefined && v !== null && v !== '');
-
-    const items = [...s.activity].reverse().map((e) => `
-      <li data-kind="${esc(e.kind)}"><span>${esc(e.icon || '•')}</span><span>${esc(e.text)}${e.cmd && e.cmd !== e.text ? `<br><code>${esc(e.cmd)}</code>` : ''}</span><time${e.ts ? ` data-ts="${e.ts}"` : ''}>${e.ts ? ago(now - e.ts) : ''}</time></li>`).join('');
-
-    const scroll = this.panelBody.querySelector('ol')?.scrollTop || 0;
-    this.panel.style.setProperty('--agent', a.colorHex);
-    this.panel.style.setProperty('--status', STATUS_COLORS[a.visualStatus] || '#999');
-    this.panelBody.innerHTML = `
-      <header>
-        <span class="provider"><i></i>${esc(p.name)} · ${esc(KIND_NAMES[a.kind] || '')}</span>
-        <h2>${esc(s.title)}</h2>
-        <span class="status">${esc(STATUS_LABELS[a.visualStatus] || a.visualStatus)}</span>
-      </header>
-      <dl>${rows.map(([k, v, since]) => `<dt>${esc(k)}</dt><dd${since ? ` data-since="${since}"` : ''}>${esc(v)}</dd>`).join('')}</dl>
-      ${resume ? `<div class="actions"><button type="button" data-copy="${esc(resume)}">Copy resume command</button><button type="button" data-copy="${esc(rawId)}">Copy session id</button></div>` : ''}
-      <h3>Recent activity</h3>
-      <ol>${items || '<li><span>🫥</span><span>Nothing yet.</span><time></time></li>'}</ol>`;
-    this.panelBody.querySelector('ol').scrollTop = scroll;
-    for (const btn of this.panelBody.querySelectorAll('[data-copy]')) {
-      btn.dataset.label = btn.textContent;
-      if (this.copied?.value === btn.dataset.copy && now < this.copied.until) btn.textContent = this.copied.label;
-      btn.addEventListener('click', async () => {
-        let label = 'Copied!';
-        try {
-          await navigator.clipboard.writeText(btn.dataset.copy);
-        } catch {
-          label = 'Copy failed';
-        }
-        this.copied = { value: btn.dataset.copy, label, until: Date.now() + 1500 };
-        btn.textContent = label;
-        setTimeout(() => { if (btn.isConnected) btn.textContent = btn.dataset.label; }, 1500);
-      });
+    if (changed('details', JSON.stringify([s.id, rows.map(([k, v, since]) => (since ? [k, since] : [k, v]))]))) {
+      this.panelBody.querySelector('.tab.details').innerHTML = `
+        <dl>${rows.map(([k, v, since]) => `<dt>${esc(k)}</dt><dd${since ? ` data-since="${since}"` : ''}>${esc(v)}</dd>`).join('')}</dl>
+        ${resume ? `<div class="actions"><button type="button" data-copy="${esc(resume)}">Copy resume command</button><button type="button" data-copy="${esc(rawId)}">Copy session id</button></div>` : ''}`;
+      for (const btn of this.panelBody.querySelectorAll('.tab.details [data-copy]')) btn.addEventListener('click', () => copyFrom(btn));
     }
+    this.updateTimes(now);
   }
+
 
   renderProject(now) {
     const { key, focus } = this.project;
@@ -329,8 +353,4 @@ const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', min
 function ago(ms) {
   if (ms < 5000) return 'now';
   return `${formatDuration(ms).split(' ')[0]} ago`;
-}
-
-function shellQuote(s) {
-  return /^[\w./-]+$/.test(s || '') ? s : `'${String(s).replace(/'/g, "'\\''")}'`;
 }

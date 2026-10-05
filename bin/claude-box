@@ -1,0 +1,13 @@
+#!/bin/sh
+# Claude Code with the Meeseeks Box channel (server/channel/mcp-server.js),
+# so you can talk to the session from the box. Use it instead of `claude`: it
+# takes the same arguments, e.g. `claude-box --resume <session-id>`.
+#
+# Channels are a research preview and only Anthropic's own load by default,
+# so Claude Code asks you to confirm this one each time it starts.
+here=$(cd "$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/.." && pwd)
+node=$(command -v node) || { echo "claude-box: can't find node" >&2; exit 1; }
+# A path as a JSON string's contents: backslashes and quotes escaped.
+json() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+config=$(printf '{"mcpServers":{"meeseeks":{"command":"%s","args":["%s"]}}}' "$(json "$node")" "$(json "$here/server/channel/mcp-server.js")")
+exec claude --mcp-config "$config" --dangerously-load-development-channels server:meeseeks "$@"
