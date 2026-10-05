@@ -509,23 +509,64 @@ function beanbag(x, z, color, rot) {
   return g;
 }
 
+// `top` is the height of the playing surface, where the paddles and ball lie.
+const TABLE = { w: 1.52, d: 2.74, top: 0.785, green: '#1f6f55' };
+
 function pingPong(x, z) {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
-  g.add(box(1.52, 0.05, 2.74, '#1f6f55', 0, 0.76, 0));
-  g.add(box(0.02, 0.052, 2.74, '#f4f6f8', 0, 0.762, 0, { cast: false }));
-  g.add(box(1.52, 0.052, 0.02, '#f4f6f8', 0, 0.762, 1.36, { cast: false }));
-  g.add(box(1.52, 0.052, 0.02, '#f4f6f8', 0, 0.762, -1.36, { cast: false }));
-  g.add(box(1.7, 0.16, 0.02, '#e9eef2', 0, 0.86, 0));
+  // Lines are painted on so they can't z-fight with the top or shimmer edge-on.
+  const green = toon(TABLE.green);
+  const top = mesh(new THREE.BoxGeometry(TABLE.w, 0.05, TABLE.d), [green, green, ownToon('#ffffff', { map: tableLines() }), green, green, green]);
+  top.position.y = TABLE.top - 0.025;
+  g.add(top);
+  // At 2cm the net is thinner than the sun's normalBias, so shadow lookups
+  // pushed off one face land beyond the other and it shadows itself in a
+  // jagged band.
+  g.add(box(1.7, 0.16, 0.02, '#e9eef2', 0, TABLE.top + 0.075, 0, { receive: false }));
   for (const sx of [-0.65, 0.65]) for (const sz of [-1.2, 1.2]) g.add(box(0.06, 0.74, 0.06, '#2b2e33', sx, 0.37, sz));
   for (const [px, pz, c] of [[0.3, 0.9, '#d63031'], [-0.4, -1.0, '#0984e3']]) {
     const paddle = new THREE.Group();
-    paddle.position.set(px, 0.8, pz);
+    paddle.position.set(px, TABLE.top + 0.0075, pz);
     paddle.rotation.y = px;
     paddle.add(cyl(0.08, 0.08, 0.015, c, 16));
     paddle.add(box(0.03, 0.015, 0.1, '#b98552', 0, 0, 0.11));
     g.add(paddle);
   }
-  g.add(sphere(0.02, '#fff', 10).translateY(0.8).translateZ(0.3).translateX(-0.2));
+  g.add(sphere(0.02, '#fff', 10).translateY(TABLE.top + 0.02).translateZ(0.3).translateX(-0.2));
   return g;
+}
+
+let tableTexture;
+
+/**
+ * The table-tennis top: 2cm white lines round the edge and down the middle.
+ * Built once and shared by every office.
+ */
+function tableLines() {
+  if (tableTexture) return tableTexture;
+  // Each mip level paints its own lines at least a texel wide; averaged down
+  // by the GPU they fade into the green from the overview.
+  const levels = [];
+  for (let w = 512, h = 1024; h >= 1; w = Math.max(1, w >> 1), h >>= 1) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const lx = Math.max(1, Math.round((0.02 / TABLE.w) * w));
+    const lz = Math.max(1, Math.round((0.02 / TABLE.d) * h));
+    ctx.fillStyle = TABLE.green;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#f4f6f8';
+    for (const x of [0, Math.round((w - lx) / 2), w - lx]) ctx.fillRect(x, 0, lx, h);
+    for (const z of [0, h - lz]) ctx.fillRect(0, z, w, lz);
+    levels.push(canvas);
+  }
+  tableTexture = new THREE.CanvasTexture(levels[0]);
+  tableTexture.mipmaps = levels;
+  tableTexture.colorSpace = THREE.SRGBColorSpace;
+  // Sharp at the low angles you see it at walking past.
+  tableTexture.anisotropy = 16;
+  tableTexture.userData.shared = true;
+  return tableTexture;
 }
