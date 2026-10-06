@@ -32,9 +32,15 @@ const bySession = (a, b) => compare(a.session, b.session);
 
 export class Seating {
   constructor() {
-    /** id -> { session, level, since, missingSince } */
+    /** id -> { session, level, since, missingSince, ended } */
     this.seats = new Map();
     this.hold = false;
+  }
+
+  /** A session you ended yourself: it goes as soon as it's missing, without the grace for flaky polls. */
+  end(id) {
+    const seat = this.seats.get(id);
+    if (seat) seat.ended = true;
   }
 
   /**
@@ -53,7 +59,7 @@ export class Seating {
         continue;
       }
       seat.missingSince ||= now;
-      if (now - seat.missingSince > GRACE_MS) {
+      if (seat.ended || now - seat.missingSince > GRACE_MS) {
         this.seats.delete(id);
         gone.push(id);
       }

@@ -309,7 +309,14 @@ body.board-focus .labels { opacity: 0; pointer-events: none; }
 .panel .tabs button[aria-selected='true'] { color: var(--text); border-bottom-color: var(--agent); }
 .panel .tabs button:hover { color: var(--text); }
 .panel .tab { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.panel .tab.activity ol { padding-top: 12px; }
+.panel .tab.activity ol { padding-top: 10px; gap: 4px; }
+/* Compact rows, so a turn's worth fits: two lines of text at most, a command on one (all of it on hover). */
+.panel .tab.activity li { grid-template-columns: 18px 1fr auto; gap: 6px; padding: 4px 8px; font-size: 12px; line-height: 1.3; }
+.panel .tab.activity li[data-kind='tool'] { font-size: 11px; }
+.panel .tab.activity .what { min-width: 0; }
+.panel .tab.activity .what > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.panel .tab.activity .what code { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 10.5px; }
+.panel .tab.activity li time { font-size: 10px; }
 .panel .tab.details { overflow-y: auto; }
 .panel .tab.details dl { border-bottom: 0; }
 
@@ -319,7 +326,7 @@ body.board-focus .labels { opacity: 0; pointer-events: none; }
 .panel .convo li.you { align-self: flex-end; background: rgba(138, 180, 248, 0.16); border-bottom-right-radius: 4px; }
 .panel .convo li.agent { align-self: flex-start; background: rgba(255, 255, 255, 0.06); border-left: 3px solid var(--agent); border-bottom-left-radius: 4px; }
 .panel .convo li.did { align-self: stretch; max-width: none; padding: 4px 10px; background: none; color: var(--muted); font-size: 12px; text-align: center; overflow-wrap: anywhere; }
-.panel .convo li.empty { align-self: center; background: none; color: var(--muted); }
+.panel .convo li.empty { align-self: center; transform: none; max-width: none; background: none; color: var(--muted); }
 .panel .convo .who { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 2px; font-size: 11px; color: var(--muted); }
 .panel .convo .who b { font-weight: 800; }
 .panel .convo .text p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -340,7 +347,7 @@ body.board-focus .labels { opacity: 0; pointer-events: none; }
 
 .panel .foot { padding: 0 12px 12px; }
 .panel .compose { display: flex; gap: 8px; align-items: flex-end; }
-.panel .compose textarea {
+.panel .compose textarea, .panel .summon textarea, .panel .summon input {
   flex: 1;
   min-height: 40px;
   resize: none;
@@ -351,7 +358,29 @@ body.board-focus .labels { opacity: 0; pointer-events: none; }
   color: var(--text);
   font: 14px/1.35 Nunito, system-ui;
 }
-.panel .compose textarea:focus { outline: 2px solid var(--agent); outline-offset: 1px; }
+.panel .compose textarea:focus, .panel .summon textarea:focus, .panel .summon input:focus { outline: 2px solid var(--agent); outline-offset: 1px; }
+/* A Meeseeks out of the box: what it's for, and where. */
+.panel .summon { display: flex; flex-direction: column; gap: 8px; }
+.panel .summon .picker { display: flex; flex-direction: column; gap: 6px; }
+.panel .summon .folder { display: flex; gap: 8px; align-items: center; }
+.panel .summon .folder .browse { padding: 6px 10px; font-size: 12px; box-shadow: 1px 1px 0 var(--ink); }
+.panel .summon .known { display: flex; flex-wrap: wrap; gap: 6px; }
+.panel .summon .known button { padding: 3px 9px; font: 700 11px ui-monospace, Menlo, monospace; border-radius: 999px; box-shadow: none; background: rgba(255, 255, 255, 0.08); color: var(--text); border-color: rgba(255, 255, 255, 0.18); }
+.panel .summon .known button.on { background: #6ec6ee; color: var(--ink); border-color: var(--ink); }
+.panel .summon .browser { border: 2px solid var(--ink); border-radius: 12px; background: rgba(0, 0, 0, 0.3); overflow: hidden; }
+.panel .summon .browser .where { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.panel .summon .browser .where code { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+.panel .summon .browser .up { padding: 2px 8px; font-size: 12px; box-shadow: none; }
+.panel .summon .browser ul { list-style: none; margin: 0; padding: 4px; max-height: 150px; overflow-y: auto; }
+.panel .summon .browser li { display: block; padding: 0; background: none; }
+.panel .summon .browser li button { width: 100%; text-align: left; padding: 4px 8px; border: 0; border-radius: 6px; box-shadow: none; background: none; color: var(--text); font: 600 12px Nunito, system-ui; }
+.panel .summon .browser li button:hover { background: rgba(255, 255, 255, 0.1); }
+.panel .summon .browser li.none { padding: 6px 8px; color: var(--muted); font-size: 12px; }
+.panel .summon input { min-height: 0; padding: 7px 10px; font: 12px ui-monospace, Menlo, monospace; }
+.panel .summon .go { display: flex; gap: 8px; justify-content: flex-end; }
+.panel .summon .go [type=submit] { background: #6ec6ee; }
+.panel .summon .error { color: #ff8f80; font-size: 12px; }
+.panel .foot .poof { display: block; margin: 8px 0 0 auto; padding: 4px 10px; font-size: 11px; box-shadow: 1px 1px 0 var(--ink); }
 .panel .foot button, .panel .waiting button {
   font: 800 13px Nunito, system-ui;
   padding: 9px 14px;

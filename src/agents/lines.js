@@ -9,6 +9,8 @@ const LINES = {
     stress: ['Existence is pain!', "We have to finish this task!", "Why won't this build pass?!", 'Meeseeks don’t usually live this long!'],
     sleep: ['Zzz…', '…caaan… zzz', 'Zzz… look at meee…'],
     done: ['All done! ✨', 'Task complete! *poof*', 'Ooh, that was fun!'],
+    task: ['Caaan do!', 'Ooh, I can do that!', 'Ooh, yeah! On it!'],
+    skip: ['Nothing? Ooh, okay! *poof*', 'No task? Caaan go! *poof*', 'Ooh, never mind, then! *poof*'],
     helper: ['I’m Mr. Meeseeks too!', 'Summoned to help!'],
     down: ['Into the battery! Caaan do!', 'Ooh, I’ll work from the battery!', 'Look at me, I’m powering the car!'],
     up: ['Ooh, a desk upstairs!', 'Going up! Look at me!', 'Out of the battery! Caaan do!'],

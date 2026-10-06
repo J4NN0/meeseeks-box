@@ -11,6 +11,8 @@ import path from 'node:path';
  */
 export const CHANNEL_DIR = process.env.MEESEEKS_CHANNEL_DIR || path.join(os.homedir(), '.meeseeks-box', 'channels');
 export const channelSocket = (pid) => path.join(CHANNEL_DIR, `${pid}.sock`);
+/** The socket of a session the box started itself (../meeseeks.js), named after its session id. */
+export const boxSocket = (sessionId) => path.join(CHANNEL_DIR, `box-${sessionId}.sock`);
 /** The channel's name in Claude Code's MCP config, as bin/claude-box sets it up. */
 export const CHANNEL_NAME = 'meeseeks';
 /** The longest prompt you can send a session from the box. */

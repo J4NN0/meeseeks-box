@@ -11,7 +11,7 @@ const KIND_NAMES = { meeseeks: 'A Meeseeks', clawd: 'Clawd', butterbot: 'A Butte
 const TABS = [['chat', '💬 Chat'], ['activity', '📜 Activity'], ['details', '🔎 Details']];
 
 export class Hud {
-  constructor({ mode, onModeChange, onWalk, onMeeting, onReset, onClosePanel, onGoToAgent, onVerse }) {
+  constructor({ mode, onModeChange, onWalk, onMeeting, onReset, onClosePanel, onGoToAgent, onVerse, box }) {
     const select = $('mascot-mode');
     for (const [value, label] of Object.entries(MASCOT_MODES)) select.add(new Option(label, value, false, value === mode));
     select.addEventListener('change', () => onModeChange(select.value));
@@ -39,7 +39,7 @@ export class Hud {
     this.today = null;
     this.agents = [];
     this.panelKey = '';
-    this.talk = new Talk();
+    this.talk = new Talk({ box });
     this.tab = 'chat';
     this.onGoToAgent = onGoToAgent;
     // One listener for the project panel's buttons, which are rebuilt often.
@@ -136,7 +136,8 @@ export class Hud {
   announce(type, agent) {
     const who = `<b>${esc(agent.session.project || agent.session.title)}</b>${agent.where ? ` in the ${esc(agent.where)}` : ''}`;
     if (type === 'spawn') this.toast(`🟦 ${KIND_NAMES[agent.kind] || 'An agent'} appeared for ${who}`, agent.colorHex);
-    if (type === 'leave') this.toast(`✨ ${who} is done. *poof*`, agent.colorHex);
+    // One out of the box that you skipped isn't done, just gone, as you asked.
+    if (type === 'leave' && agent.session.box?.state !== 'new') this.toast(`✨ ${who} is done. *poof*`, agent.colorHex);
     if (type === 'waiting') this.toast(`🙋 ${who} is waiting on you`, agent.colorHex);
   }
 
@@ -158,7 +159,9 @@ export class Hud {
       <section class="tab details" data-tab="details"></section>`;
     for (const btn of this.panelBody.querySelectorAll('[role=tab]')) btn.addEventListener('click', () => this.setTab(btn.dataset.tab));
     this.talk.mount(this.panelBody.querySelector('.tab.chat'), agent);
-    this.setTab(this.tab);
+    // Just out of the box, it wants to know what it's for.
+    this.setTab(agent.awaiting ? 'chat' : this.tab);
+    if (agent.awaiting) requestAnimationFrame(() => this.talk.focus());
     this.renderPanel(Date.now());
   }
 
@@ -175,6 +178,7 @@ export class Hud {
 
   /** Today's recap for one project; `focus` highlights a session or one of its turns. */
   showProject(key, focus = null) {
+    this.talk.leave();
     this.selected = null;
     this.project = { key, focus, scrolled: false };
     this.panelKey = '';
@@ -183,6 +187,7 @@ export class Hud {
   }
 
   hidePanel() {
+    this.talk.leave();
     this.selected = null;
     this.project = null;
     this.panel.hidden = true;
@@ -216,11 +221,12 @@ export class Hud {
 
     if (changed('activity', `${s.id}:${s.activity.length}:${s.activity.at(-1)?.ts}`)) {
       const items = [...s.activity].reverse().map((e) => `
-        <li data-kind="${esc(e.kind)}"><span>${esc(e.icon || '•')}</span><span>${esc(e.text)}${e.cmd && e.cmd !== e.text ? `<br><code>${esc(e.cmd)}</code>` : ''}</span><time${e.ts ? ` data-ts="${e.ts}"` : ''}>${e.ts ? ago(now - e.ts) : ''}</time></li>`).join('');
+        <li data-kind="${esc(e.kind)}"><span>${esc(e.icon || '•')}</span><span class="what" title="${esc(e.cmd && e.cmd !== e.text ? `${e.text}\n${e.cmd}` : e.text)}"><span>${esc(e.text)}</span>${e.cmd && e.cmd !== e.text ? `<code>${esc(e.cmd)}</code>` : ''}</span><time${e.ts ? ` data-ts="${e.ts}"` : ''}>${e.ts ? ago(now - e.ts) : ''}</time></li>`).join('');
       this.panelBody.querySelector('.tab.activity ol').innerHTML = items || '<li><span>🫥</span><span>Nothing yet.</span><time></time></li>';
     }
 
-    const resume = s.provider === 'claude' ? `cd ${shellQuote(s.cwd)} && claude --resume ${rawId}` : s.provider === 'codex' ? `codex resume ${rawId}` : '';
+    // A Meeseeks from the box that hasn't been given anything has no conversation yet.
+    const resume = s.box?.state === 'new' ? '' : s.provider === 'claude' ? `cd ${shellQuote(s.cwd)} && claude --resume ${rawId}` : s.provider === 'codex' ? `codex resume ${rawId}` : '';
     const rows = [
       ['Project', s.project],
       ['Directory', s.cwd],

@@ -143,7 +143,7 @@ export class Multiverse {
         record.session = s;
         record.level = level;
         record.where = level ? verse(level).name : '';
-        record.kind = mascotKind(this.mode, s.provider, s.id);
+        record.kind = mascotKind(this.mode, s);
         record.visualStatus = visualStatus(s, now);
         if (arrivals.has(s.id)) this.onEvent?.('spawn', record);
         else if (was !== 'waiting' && s.status === 'waiting') this.onEvent?.('waiting', record);
@@ -216,11 +216,16 @@ export class Multiverse {
   setMode(mode) {
     this.mode = mode;
     for (const u of this.universes) if (u.built) u.manager.setMode(mode);
-    for (const r of this.records.values()) r.kind = mascotKind(mode, r.session.provider, r.id);
+    for (const r of this.records.values()) r.kind = mascotKind(mode, r.session);
   }
 
   find(id) {
     return this.records.get(id) || null;
+  }
+
+  /** You sent `id` away: it poofs with the next sync. */
+  end(id) {
+    this.seating.end(id);
   }
 
   /** Every agent in every universe, for the HUD and the wall boards. */

@@ -28,9 +28,11 @@ export function agentColor(provider, seed) {
   );
 }
 
-export function mascotKind(mode, provider, seed) {
-  if (mode === 'mascots') return provider === 'codex' ? 'butterbot' : 'clawd';
-  if (mode === 'chaos') return ['meeseeks', 'clawd', 'butterbot'][hash(seed) % 3];
+export function mascotKind(mode, session) {
+  // Whatever the mode, out of the Meeseeks Box comes a Meeseeks.
+  if (session.box) return 'meeseeks';
+  if (mode === 'mascots') return session.provider === 'codex' ? 'butterbot' : 'clawd';
+  if (mode === 'chaos') return ['meeseeks', 'clawd', 'butterbot'][hash(session.id) % 3];
   return 'meeseeks';
 }
 

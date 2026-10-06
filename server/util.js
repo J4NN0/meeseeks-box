@@ -59,3 +59,11 @@ export function pushActivity(list, item) {
 export function pruneMap(map, seen) {
   for (const key of map.keys()) if (!seen.has(key)) map.delete(key);
 }
+
+/** An error the API answers with `status`. */
+export class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}

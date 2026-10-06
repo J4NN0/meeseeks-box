@@ -5,22 +5,25 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { MAX_TEXT, channelSocket } from './config.js';
+import { HttpError } from '../util.js';
+import { MAX_TEXT, boxSocket, channelSocket } from './config.js';
 
 const RETRY_MS = 3000;
+// A Meeseeks from the box opens its socket at the start of each turn: look again soon.
+const BOX_RETRY_MS = 500;
 const SENT_TIMEOUT_MS = 3000;
 // Permission prompts answered in the terminal: the session moved on.
 const SETTLE_GRACE_MS = 2500;
 
 class Link {
-  constructor(pid) {
+  constructor(pid, file) {
     this.pid = pid;
     this.ready = false;
     this.enabled = false;
     this.closed = false;
     this.permissions = new Map();
     this.waiting = new Map(); // message id → resolve, until the channel has it
-    this.socket = net.createConnection(channelSocket(pid));
+    this.socket = net.createConnection(file);
     this.socket.setEncoding('utf8');
     let carry = '';
     this.socket.on('data', (chunk) => {
@@ -78,10 +81,12 @@ const sessionPids = new Map(); // session id → pid, as of the last scan
 
 /**
  * Whether a permission prompt was answered without us (in the terminal):
+ * never, for a session the box started (`held`: it has no terminal); else
  * the transcript moved on (the tool ran, or was refused), the session's
  * status changed while it works, or it's idle with no tool call waiting.
  */
 function settled(p, session, now) {
+  if (p.held) return false;
   if (session.transcriptAt > p.at) return true;
   if (session.rawStatus === 'busy') return session.statusSince > p.at;
   return session.ask?.kind !== 'tool' && now - p.at > SETTLE_GRACE_MS;
@@ -99,26 +104,29 @@ function openPermission(link, session, now) {
 
 /**
  * Links up with the channel of every Claude Code session that has one, and
- * notes on each session whether you can talk to it (`talk`).
+ * notes on each session whether you can talk to it (`talk`). A scan overtaken
+ * by a newer one (`latest` false) may have missed sessions, so it closes no links.
  */
-export function syncChannels(sessions, now = Date.now()) {
+export function syncChannels(sessions, now = Date.now(), latest = true) {
   const seen = new Set();
-  sessionPids.clear();
+  if (latest) sessionPids.clear();
   for (const s of sessions) {
     if (s.provider !== 'claude' || !s.pid) continue;
     seen.add(s.pid);
-    sessionPids.set(s.id, s.pid);
+    if (latest) sessionPids.set(s.id, s.pid);
     let link = links.get(s.pid);
     if (link?.closed) {
       links.delete(s.pid);
       link = null;
     }
     if (!link && now >= (retryAt.get(s.pid) || 0)) {
-      retryAt.set(s.pid, now + RETRY_MS);
-      if (fs.existsSync(channelSocket(s.pid))) links.set(s.pid, (link = new Link(s.pid)));
+      retryAt.set(s.pid, now + (s.box ? BOX_RETRY_MS : RETRY_MS));
+      const file = s.box ? boxSocket(s.box.sessionId) : channelSocket(s.pid);
+      if (fs.existsSync(file)) links.set(s.pid, (link = new Link(s.pid, file)));
     }
     s.talk = link?.ready ? { enabled: link.enabled, permission: openPermission(link, s, now) } : null;
   }
+  if (!latest) return;
   for (const [pid, link] of links) {
     if (seen.has(pid)) continue;
     link.close();
@@ -132,31 +140,24 @@ function linkFor(id) {
   return link?.ready ? link : null;
 }
 
-class TalkError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
-
 /** Sends `text` to the session as your next prompt. */
 export async function talk({ id, text }) {
   const link = linkFor(id);
-  if (!link) throw new TalkError(409, "This session isn't connected to the box.");
-  if (!link.enabled) throw new TalkError(409, 'This session was started without the channel switched on.');
+  if (!link) throw new HttpError(409, "This session isn't connected to the box.");
+  if (!link.enabled) throw new HttpError(409, 'This session was started without the channel switched on.');
   const message = typeof text === 'string' ? text.trim() : '';
-  if (!message) throw new TalkError(400, 'Nothing to send.');
-  if (message.length > MAX_TEXT) throw new TalkError(413, 'That message is too long.');
-  if (!(await link.say(message))) throw new TalkError(504, "The session didn't take the message.");
+  if (!message) throw new HttpError(400, 'Nothing to send.');
+  if (message.length > MAX_TEXT) throw new HttpError(413, 'That message is too long.');
+  if (!(await link.say(message))) throw new HttpError(504, "The session didn't take the message.");
   return { ok: true };
 }
 
 /** Allows or denies the permission prompt `requestId`. */
 export function decide({ id, requestId, behavior }) {
   const link = linkFor(id);
-  if (!link) throw new TalkError(409, "This session isn't connected to the box.");
-  if (behavior !== 'allow' && behavior !== 'deny') throw new TalkError(400, 'Allow or deny?');
-  if (!link.permissions.has(requestId)) throw new TalkError(410, 'That prompt has already been answered.');
+  if (!link) throw new HttpError(409, "This session isn't connected to the box.");
+  if (behavior !== 'allow' && behavior !== 'deny') throw new HttpError(400, 'Allow or deny?');
+  if (!link.permissions.has(requestId)) throw new HttpError(410, 'That prompt has already been answered.');
   link.send({ type: 'verdict', request_id: requestId, behavior });
   link.permissions.delete(requestId);
   return { ok: true };

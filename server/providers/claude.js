@@ -14,7 +14,7 @@ import { MAX_ACTIVITY, base, clip, grab, ms, pruneMap, pushActivity, sessionStat
 const exec = promisify(execFile);
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 // Global settings live next to ~/.claude, or inside CLAUDE_CONFIG_DIR when set.
-const CONFIG_FILE = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(os.homedir(), '.claude.json');
+export const CONFIG_FILE = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(os.homedir(), '.claude.json');
 
 function describeTool(name, input = {}) {
   const i = input || {};
@@ -202,7 +202,7 @@ export const claudeReducer = {
 };
 
 const transcriptPaths = new Map();
-async function findTranscript(sessionId, cwd) {
+export async function findTranscript(sessionId, cwd) {
   const projects = path.join(CLAUDE_DIR, 'projects');
   const guess = path.join(projects, String(cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
   const cached = transcriptPaths.get(sessionId);
@@ -242,7 +242,53 @@ async function isSameProcess(pid, procStart) {
   return ok;
 }
 
-export async function scanClaude(now) {
+/**
+ * One session as the box shows it, from its registry entry (or one the box
+ * made up for a session it started: see ../meeseeks.js) and its transcript.
+ */
+export async function claudeSession(reg, now) {
+  const transcript = await findTranscript(reg.sessionId, reg.cwd);
+  // An unreadable transcript still leaves the registry entry to show.
+  const info = (transcript && (await follow(transcript, claudeReducer).catch(() => null))) || { activity: [] };
+  return toSession(reg, info, now);
+}
+
+/** The session from its registry entry and what its transcript says (`info`). */
+export function toSession(reg, info, now) {
+  const busy = reg.status === 'busy';
+  const lastAt = Math.max(info.lastAt || 0, reg.statusUpdatedAt || 0, reg.updatedAt || 0);
+
+  return {
+    id: `claude:${reg.sessionId}`,
+    provider: 'claude',
+    pid: reg.pid,
+    name: reg.name || '',
+    title: info.title || clip(info.lastPrompt, 60) || reg.name || base(reg.cwd),
+    cwd: reg.cwd,
+    project: base(reg.cwd),
+    branch: info.branch || '',
+    model: info.model || '',
+    status: sessionStatus(busy, lastAt, now),
+    rawStatus: reg.status,
+    startedAt: reg.startedAt || 0,
+    statusSince: reg.statusUpdatedAt || lastAt,
+    turnStartedAt: busy ? info.turnStartedAt || reg.statusUpdatedAt || 0 : 0,
+    lastActivityAt: lastAt,
+    transcriptAt: info.lastAt || 0,
+    contextTokens: info.context || 0,
+    outputTokens: info.outTokens || 0,
+    helpers: busy ? info.helpers || 0 : 0,
+    entrypoint: reg.entrypoint || '',
+    version: reg.version || '',
+    lastMessage: info.lastMessage || null,
+    ask: busy ? null : info.ask || null,
+    activity: info.activity || [],
+    chat: info.chat || [],
+  };
+}
+
+/** Every running session in the registry, but the ones in `skip` (by session id). */
+export async function scanClaude(now, skip = new Set()) {
   const dir = path.join(CLAUDE_DIR, 'sessions');
   let files;
   try { files = await fsp.readdir(dir); } catch { return []; }
@@ -257,43 +303,11 @@ export async function scanClaude(now) {
     if (!reg?.sessionId || !reg.pid) continue;
     seenIds.add(reg.sessionId);
     seenPids.add(reg.pid);
-    if (!(await isSameProcess(reg.pid, reg.procStart))) continue;
+    if (skip.has(reg.sessionId) || !(await isSameProcess(reg.pid, reg.procStart))) continue;
 
-    const transcript = await findTranscript(reg.sessionId, reg.cwd);
-    // An unreadable transcript still leaves the registry entry to show.
-    const info = (transcript && (await follow(transcript, claudeReducer).catch(() => null))) || { activity: [] };
-    const busy = reg.status === 'busy';
-    const lastAt = Math.max(info.lastAt || 0, reg.statusUpdatedAt || 0, reg.updatedAt || 0);
-
-    sessions.push({
-      id: `claude:${reg.sessionId}`,
-      provider: 'claude',
-      pid: reg.pid,
-      name: reg.name || '',
-      title: info.title || clip(info.lastPrompt, 60) || reg.name || base(reg.cwd),
-      cwd: reg.cwd,
-      project: base(reg.cwd),
-      branch: info.branch || '',
-      model: info.model || '',
-      status: sessionStatus(busy, lastAt, now),
-      rawStatus: reg.status,
-      startedAt: reg.startedAt || 0,
-      statusSince: reg.statusUpdatedAt || lastAt,
-      turnStartedAt: busy ? info.turnStartedAt || reg.statusUpdatedAt || 0 : 0,
-      lastActivityAt: lastAt,
-      transcriptAt: info.lastAt || 0,
-      contextTokens: info.context || 0,
-      outputTokens: info.outTokens || 0,
-      helpers: busy ? info.helpers || 0 : 0,
-      entrypoint: reg.entrypoint || '',
-      version: reg.version || '',
-      lastMessage: info.lastMessage || null,
-      ask: busy ? null : info.ask || null,
-      activity: info.activity || [],
-      chat: info.chat || [],
-    });
+    sessions.push(await claudeSession(reg, now));
   }
-  pruneMap(transcriptPaths, seenIds);
+  pruneMap(transcriptPaths, new Set([...seenIds, ...skip]));
   pruneMap(pidVerdicts, seenPids);
   return sessions;
 }

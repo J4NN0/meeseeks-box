@@ -20,7 +20,8 @@ const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 
 
 /**
  * One agent session made flesh: spawns from the Meeseeks Box, walks to a
- * free desk, works (or panics) while the session runs, then poofs. Agents
+ * free desk, works (or panics) while the session runs, then poofs. One you
+ * summoned by pressing the box waits beside it for its instruction first. Agents
  * moving between the garage and the universes in its car battery walk into
  * the battery or pop out of it instead (`entry: 'battery'`, `leave('down')`),
  * and an office built while you weren't looking starts with everyone
@@ -61,7 +62,7 @@ export class Agent {
     this.color = agentColor(session.provider, session.id);
     this.colorHex = `#${this.color.getHexString()}`;
 
-    this.kind = mascotKind(mode, session.provider, session.id);
+    this.kind = mascotKind(mode, session);
     this.character = this.makeCharacter(this.kind);
     world.scene.add(this.character.root);
 
@@ -429,6 +430,11 @@ export class Agent {
     this.session = session;
   }
 
+  /** Just out of the box you pressed, and you haven't said what it's for yet. */
+  get awaiting() {
+    return this.session.box?.state === 'new';
+  }
+
   /**
    * `ended`: the session is over, poof. `down`: moving deeper into the
    * battery, so walk over and hop in. `up`: moving to an office upstairs.
@@ -443,9 +449,10 @@ export class Agent {
     if (this.chair && this.chair !== this.desk) this.putDownCup();
     this.phase = 'leaving';
     this.phaseTime = 0;
-    // Poofs right here, saying why: the session ended, it's needed upstairs,
-    // or it was bumped down before it even reached a desk.
-    this.say(line(this.kind, reason === 'ended' ? 'done' : reason), 1.6);
+    // Poofs right here, saying why: the session ended (or, out of the box,
+    // never had a task), it's needed upstairs, or it was bumped down before
+    // it even reached a desk.
+    this.say(line(this.kind, reason !== 'ended' ? reason : this.awaiting ? 'skip' : 'done'), 1.6);
   }
 
   depart() {
@@ -483,7 +490,7 @@ export class Agent {
   }
 
   setMascot(mode) {
-    const kind = mascotKind(mode, this.session.provider, this.session.id);
+    const kind = mascotKind(mode, this.session);
     if (kind === this.kind || this.phase === 'leaving' || this.phase === 'gone') return;
     const old = this.character;
     const next = this.makeCharacter(kind);
@@ -540,9 +547,12 @@ export class Agent {
         root.scale.setScalar(elasticOut(k));
         if (this.emergeFrom) hop(root.position, this.emergeFrom, this.spawnPoint, k);
         c.setMode('stand');
-        c.setMood('cheer');
+        c.setMood(this.phaseTime > 1.25 ? 'wait' : 'cheer');
         root.rotation.y = damp(root.rotation.y, 0, 6, dt);
-        if (this.phaseTime > 1.25) this.setPhase('walking');
+        if (this.phaseTime > 1.25 && !this.awaiting) {
+          if (this.session.box) this.say(line(this.kind, 'task'), 2.2);
+          this.setPhase('walking');
+        }
         break;
       }
       case 'walking': {
@@ -870,8 +880,9 @@ export class Agent {
         look: p.clone().addScaledVector(left, 0.75).setY(1.0),
       };
     }
-    // On its way to the meeting, it's off somewhere between the two.
-    if (this.desk && this.phase !== 'convening') {
+    // On its way to the meeting, it's off somewhere between the two; just
+    // out of the box, it's still beside it.
+    if (this.desk && this.phase !== 'convening' && this.phase !== 'arriving') {
       // Over the shoulder and a bit high, so the head doesn't hide the screen.
       // Looking slightly right of the monitor keeps it clear of the side panel.
       const look = this.desk.root.localToWorld(new THREE.Vector3(0.55, 1.15, -0.2));
@@ -879,6 +890,9 @@ export class Agent {
       return { eye, look };
     }
     const p = this.character.root.getWorldPosition(new THREE.Vector3());
+    // Out of the box, from in front and above it, the box in view and the
+    // side panel clear of them both.
+    if (this.phase === 'arriving') return { eye: p.clone().add(new THREE.Vector3(1.2, 2.9, 6.2)), look: p.clone().add(new THREE.Vector3(0.9, 1.25, 0.3)) };
     return { eye: p.clone().add(new THREE.Vector3(1.5, 2.2, 3)), look: p.clone().add(new THREE.Vector3(0, 1, 0)) };
   }
 }

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { box, cyl, mesh } from '../engine/toon.js';
+import { box, cyl, mesh, noInk } from '../engine/toon.js';
 import { labelTexture } from './screens.js';
 
 // The Meeseeks Box itself: press the button, get a Meeseeks. Every new agent
-// session "presses" it.
+// session "presses" it, and so can you: click it and out comes one that asks
+// what it's for (see server/meeseeks.js).
 
 export function createMeeseeksBox() {
   const group = new THREE.Group();
@@ -26,6 +27,12 @@ export function createMeeseeksBox() {
   const label = mesh(new THREE.PlaneGeometry(0.4, 0.1), new THREE.MeshBasicMaterial({ map: labelTexture('MR. MEESEEKS', { bg: '#3f8fd6', fg: '#f4f6f8', w: 320, h: 80, font: '36px "Luckiest Guy", system-ui' }) }), { cast: false });
   label.position.set(0, 0.2, 0.242);
   boxGroup.add(label);
+
+  // A bit bigger than the box, so it's easy to hit.
+  const reach = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.62, 0.62), new THREE.MeshBasicMaterial({ visible: false }));
+  reach.position.y = 0.2;
+  boxGroup.add(noInk(reach));
+  group.traverse((o) => { if (o.isMesh) o.userData.meeseeksBox = true; });
 
   let press = 0;
   let shake = 0;

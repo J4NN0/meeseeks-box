@@ -7,6 +7,8 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { apiMiddleware } from './api.js';
+import { keyLink } from './key.js';
+import { stopAll } from './meeseeks.js';
 import { envNumber } from './util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -56,4 +58,11 @@ http
     if (!allowedHosts.has(req.headers.host)) { res.writeHead(403).end(); return; }
     api(req, res, () => serveStatic(req, res));
   })
-  .listen(port, host, () => console.log(`🟦 Meeseeks Box running at http://${host}:${port}`));
+  .listen(port, host, () => {
+    console.log(`🟦 Meeseeks Box running at http://${host}:${port}`);
+    console.log(`🔑 If a browser can’t summon Meeseeks, open ${keyLink(`http://${host}:${port}`)} in it once.`);
+  });
+
+// The Meeseeks the box started stop with it.
+process.on('exit', stopAll);
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(0));

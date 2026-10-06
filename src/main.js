@@ -15,9 +15,11 @@ import { christmasLightsOn, setChristmasLights } from './world/christmas-lights.
 import { CAPACITY } from './agents/seating.js';
 import { MissionControl } from './world/mission-control.js';
 import { RecapBoard } from './world/recap-board.js';
+import { post } from './data/api.js';
 import { Feed } from './data/feed.js';
 import { TodayFeed } from './data/today.js';
 import { Hud } from './ui/hud.js';
+import { esc } from './ui/util.js';
 import { Wipe } from './ui/wipe.js';
 import { MASCOT_MODES } from './characters/index.js';
 import { CONFIG } from './config.js';
@@ -116,6 +118,19 @@ const hud = new Hud({
   onClosePanel: () => closePanel(),
   onGoToAgent: (id) => act({ kind: 'agent', agentId: id }),
   onVerse: (level) => travelTo(level),
+  box: {
+    folders: boxFolders,
+    remember(folder) {
+      store.set('box-folders', JSON.stringify([folder, ...recentBoxFolders().filter((f) => f !== folder)].slice(0, 6)));
+    },
+    refresh: () => feed.poll(),
+    gone(id) {
+      multiverse.end(id);
+      feed.poll();
+    },
+    failed: (message) => hud.toast(`💥 ${esc(message)}`),
+    close: () => closePanel(),
+  },
 });
 
 feed.onChange((sessions) => {
@@ -278,6 +293,60 @@ function act(action) {
   } else if (action.kind === 'lights') {
     setChristmasLights(!christmasLightsOn());
     store.set('lights', christmasLightsOn() ? 'on' : 'off');
+  } else if (action.kind === 'box') {
+    summon();
+  }
+}
+
+function recentBoxFolders() {
+  try { return JSON.parse(store.get('box-folders', '[]')).filter((f) => typeof f === 'string'); } catch { return []; }
+}
+
+/**
+ * Folders to offer a Meeseeks from the box: the ones you last gave one, then
+ * where your sessions work, most recent first.
+ */
+function boxFolders() {
+  const worked = [...feed.sessions.filter((s) => !s.box), ...(today.data?.sessions || [])]
+    .filter((s) => s.cwd)
+    .sort((a, b) => (b.lastActivityAt || b.lastAt || 0) - (a.lastActivityAt || a.lastAt || 0))
+    .map((s) => s.cwd);
+  return [...new Set([...recentBoxFolders(), ...worked])];
+}
+
+/** The Meeseeks you just summoned: its panel opens once it's out of the box. */
+let summoned = null;
+
+/** Pressing the box: out comes a Meeseeks, to be told what it's for. */
+async function summon() {
+  if (traveling) return;
+  here().world.box.press();
+  try {
+    const { id } = await post('/api/box/new');
+    summoned = { id, at: performance.now() };
+    feed.poll();
+  } catch (e) {
+    hud.toast(`📦 ${e.message}`);
+  }
+}
+
+/** Opens the summoned Meeseeks' panel as soon as it's out (wherever the seating put it). */
+function meetSummoned() {
+  if (!summoned) return;
+  const record = multiverse.find(summoned.id);
+  if (!record) {
+    if (performance.now() - summoned.at > 10_000) summoned = null;
+    return;
+  }
+  if (record.level !== here().level) {
+    goToAgent(summoned.id);
+    summoned = null;
+    return;
+  }
+  const agent = here().manager.byId(summoned.id);
+  if (agent?.phase === 'arriving' && agent.phaseTime > 0.6) {
+    summoned = null;
+    focusAgent(agent);
   }
 }
 
@@ -619,6 +688,7 @@ function pick(ndc, maxDistance = Infinity) {
     if (d.remote) return { remote: true, action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
     if (d.livingTv) return { tv: true, action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
     if (d.meetingBell) return { bell: true, action: { id: 'bell', kind: 'meeting', label: multiverse.meeting ? 'Meeting bell\nring to send everyone back to work' : 'Meeting bell\nring to call everyone to the meeting room' } };
+    if (d.meeseeksBox) return { box: true, action: { id: 'box', kind: 'box', label: 'Meeseeks Box' } };
     if (d.christmasLights) return { lights: true, action: { id: 'lights', kind: 'lights', label: `Christmas lights · ${christmasLightsOn() ? 'on' : 'off'}` } };
     if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
     if (hit.object.isMesh && !hit.object.material.transparent) return null;
@@ -662,7 +732,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     // A board's items only react once you've flown up to it.
     if (target?.board && target.board !== focusedBoard) target.action = null;
     setPointed(target);
-    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv || target?.bell || target?.lights));
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv || target?.bell || target?.lights || target?.box));
     pendingMove = null;
   });
   pendingMove = e;
@@ -761,6 +831,7 @@ renderer.setAnimationLoop((timestamp) => {
   }
 
   multiverse.tick(dt, t, now, camera);
+  meetSummoned();
 
   // Whatever the crosshair is on, within arm's reach of a few metres.
   if (view === 'walk' && walker.locked && !flight && ++aimFrame % 3 === 0) {

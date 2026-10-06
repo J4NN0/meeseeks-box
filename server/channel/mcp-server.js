@@ -12,8 +12,14 @@
 //                { type: 'verdict', request_id, behavior: 'allow' | 'deny' }
 //   here → box:  { type: 'hello', pid, enabled }
 //                { type: 'sent', id }  once a message is handed to Claude Code
-//                { type: 'permission', request_id, tool_name, description, input_preview, at }
+//                { type: 'permission', request_id, tool_name, description, input_preview, at, held? }
+//                  (held: only the box can answer it, see below)
 //                { type: 'settled', request_id }  once a verdict is handed over
+//
+// A session the box starts itself (../meeseeks.js) has no terminal: there
+// the box runs this with MEESEEKS_SOCKET set, as its permission prompt tool
+// (`approve`) rather than as a channel, and every prompt waits for the box,
+// unless the box is gone (MEESEEKS_BOX_PID) or can't reach the socket.
 //
 // stdout is the MCP transport: nothing else may be written to it.
 
@@ -34,6 +40,12 @@ const VERSION = '0.1.0';
 const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const REQUEST_ID = /^[a-km-z]{5}$/;
 const MAX_OPEN = 8;
+/** Set by the box for a session it started: where to listen, and that we're its permission tool. */
+const BOX_SOCKET = process.env.MEESEEKS_SOCKET || '';
+/** The box's server, which answers the prompts of a session it started. */
+const BOX_PID = Number(process.env.MEESEEKS_BOX_PID) || 0;
+/** The most of a tool's input a prompt carries: the panel shows less still. */
+const MAX_PREVIEW = 4000;
 
 const INSTRUCTIONS = [
   `Messages from the Meeseeks Box arrive as <channel source="${CHANNEL_NAME}">.`,
@@ -64,13 +76,17 @@ function onRequest({ id, method, params }) {
       id,
       result: {
         protocolVersion: PROTOCOLS.includes(asked) ? asked : PROTOCOLS[0],
-        capabilities: { experimental: { 'claude/channel': {}, 'claude/channel/permission': {} } },
+        capabilities: BOX_SOCKET ? { tools: {} } : { experimental: { 'claude/channel': {}, 'claude/channel/permission': {} } },
         serverInfo: { name: CHANNEL_NAME, title: 'Meeseeks Box', version: VERSION },
-        instructions: INSTRUCTIONS,
+        ...(BOX_SOCKET ? {} : { instructions: INSTRUCTIONS }),
       },
     });
   } else if (method === 'ping') {
     write({ id, result: {} });
+  } else if (BOX_SOCKET && method === 'tools/list') {
+    write({ id, result: { tools: [APPROVE] } });
+  } else if (BOX_SOCKET && method === 'tools/call' && params?.name === APPROVE.name) {
+    approve(params.arguments || {}).then((verdict) => write({ id, result: { content: [{ type: 'text', text: JSON.stringify(verdict) }] } }));
   } else {
     write({ id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
@@ -122,6 +138,71 @@ function permissionAsked(p) {
   broadcast(ask);
 }
 
+// The permission prompt tool ---------------------------------------------------
+
+const APPROVE = {
+  name: 'approve',
+  description: 'Asks the user, in the Meeseeks Box, whether a tool may run.',
+  inputSchema: {
+    type: 'object',
+    properties: { tool_name: { type: 'string' }, input: { type: 'object' }, tool_use_id: { type: 'string' } },
+    required: ['tool_name', 'input'],
+  },
+};
+
+const verdicts = new Map(); // request id → answer(behavior, why), until the box answers
+let unreachable = ''; // why the box can't answer, once it can't
+
+/** What Claude Code shows in its own prompt, near enough. */
+function preview(tool, input) {
+  const cap = (text) => String(text || '').slice(0, MAX_PREVIEW);
+  if (tool === 'Bash') return { description: cap(input.description), input_preview: cap(input.command) };
+  return { description: '', input_preview: cap(JSON.stringify(input, null, 2)) };
+}
+
+function requestId() {
+  const letters = 'abcdefghijkmnopqrstuvwxyz';
+  let id;
+  do id = Array.from({ length: 5 }, () => letters[Math.floor(Math.random() * letters.length)]).join('');
+  while (open.has(id));
+  return id;
+}
+
+/** Waits for the box to allow or deny, however long that takes: there's no terminal to answer instead. */
+function approve({ tool_name: tool = '', input = {} }) {
+  if (unreachable) return Promise.resolve({ behavior: 'deny', message: unreachable });
+  const ask = { type: 'permission', request_id: requestId(), tool_name: String(tool), ...preview(tool, input || {}), at: Date.now(), held: true };
+  open.set(ask.request_id, ask);
+  broadcast(ask);
+  return new Promise((resolve) => {
+    verdicts.set(ask.request_id, (behavior, why = 'The user said no, in the Meeseeks Box.') => resolve(behavior === 'allow'
+      ? { behavior: 'allow', updatedInput: input }
+      : { behavior: 'deny', message: why }));
+  });
+}
+
+/** Nobody will answer from the box: refuses what waits for it, and whatever is asked from now on. */
+function giveUp(why) {
+  if (unreachable) return;
+  unreachable = why;
+  for (const [id, answer] of verdicts) {
+    open.delete(id);
+    answer('deny', why);
+  }
+  verdicts.clear();
+}
+
+/** The box can't open our socket, so it won't see a prompt to answer. */
+function unlinked(e) {
+  if (BOX_SOCKET) giveUp(`The Meeseeks Box can’t reach this session (${e.message}), so nobody can say yes.`);
+}
+
+if (BOX_PID) {
+  setInterval(() => {
+    try { process.kill(BOX_PID, 0); } catch (e) { if (e.code === 'ESRCH') giveUp('The Meeseeks Box has closed, so nobody can say yes.'); }
+  }, 5000).unref();
+}
+
 // The box's side -------------------------------------------------------------
 
 const boxes = new Set();
@@ -142,7 +223,10 @@ function fromBox(socket, msg) {
     // Claude Code drops a verdict it didn't ask for; so do we.
     if (!open.has(request_id) || (behavior !== 'allow' && behavior !== 'deny')) return;
     open.delete(request_id);
-    notify('notifications/claude/channel/permission', { request_id, behavior });
+    if (verdicts.has(request_id)) {
+      verdicts.get(request_id)(behavior);
+      verdicts.delete(request_id);
+    } else notify('notifications/claude/channel/permission', { request_id, behavior });
     broadcast({ type: 'settled', request_id });
   }
 }
@@ -177,11 +261,11 @@ async function switchedOn(pid) {
 }
 
 async function listen() {
-  const pid = await sessionPid();
-  const enabled = await switchedOn(pid);
+  const pid = BOX_SOCKET ? process.ppid : await sessionPid();
+  const enabled = BOX_SOCKET ? true : await switchedOn(pid);
   await fsp.mkdir(CHANNEL_DIR, { recursive: true, mode: 0o700 });
   await fsp.chmod(CHANNEL_DIR, 0o700);
-  const file = channelSocket(pid);
+  const file = BOX_SOCKET || channelSocket(pid);
   // Left over from a session that crashed, or a pid the OS reused.
   await fsp.rm(file, { force: true });
 
@@ -212,7 +296,10 @@ async function listen() {
     socket.on('error', () => {});
     socket.on('close', () => boxes.delete(socket));
   });
-  server.on('error', (e) => log('socket failed:', e.message));
+  server.on('error', (e) => {
+    log('socket failed:', e.message);
+    unlinked(e);
+  });
   server.listen(file, () => {
     fs.chmodSync(file, 0o600);
     log(`listening on ${file}${enabled ? '' : ' (but the session was started without the channel flag)'}`);
@@ -223,4 +310,7 @@ async function listen() {
 }
 
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(0));
-listen().catch((e) => log('could not start:', e.message));
+listen().catch((e) => {
+  log('could not start:', e.message);
+  unlinked(e);
+});
