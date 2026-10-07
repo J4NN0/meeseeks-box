@@ -34,6 +34,8 @@ const WRITE_POLE = new THREE.Vector3(0.7, -0.5, -0.4);
 const CUP_POLE = new THREE.Vector3(0.9, -0.6, 0.1);
 const REST_POLE = new THREE.Vector3(0.8, -0.5, -0.3);
 const _target = new THREE.Vector3();
+const _upper = new THREE.Vector3();
+const _roll = new THREE.Quaternion();
 const _reach = new THREE.Vector3();
 const _tip = new THREE.Vector3();
 const _pole = new THREE.Vector3();
@@ -45,6 +47,16 @@ const _qJoint = new THREE.Quaternion();
 const _basis = new THREE.Matrix4();
 const _euler = new THREE.Euler();
 const ACCESSORIES = ['none', 'headphones', 'beanie', 'cap', 'glasses', 'none', 'headphones', 'tie'];
+
+/**
+ * How a hand turns about its forearm: not at all with the arm down, half a
+ * turn once it's up overhead, so the palm faces front and the thumb points
+ * at the head instead of drooping off the outside.
+ */
+function palmRoll({ shoulder, s }) {
+  const up = _upper.set(0, -1, 0).applyQuaternion(shoulder.quaternion).y;
+  return _roll.setFromAxisAngle(UP, s * Math.PI * THREE.MathUtils.smoothstep(up, 0.3, 0.6));
+}
 
 export class Meeseeks extends CharacterBase {
   constructor({ color = '#6ec6ee', seed = 'meeseeks', accessory } = {}) {
@@ -186,7 +198,7 @@ export class Meeseeks extends CharacterBase {
       palm.scale.set(0.85, 1.15, 0.6);
       hand.add(palm);
       const thumb = limb(0.06, 0.016, skin, 6);
-      const thumbJoint = joint(hand, -s * 0.035, 0.01, 0.015);
+      const thumbJoint = joint(hand, -s * 0.035, 0.01, 0);
       thumbJoint.rotation.z = -s * 0.7;
       thumbJoint.add(thumb);
       return { shoulder, elbow, hand, s };
@@ -270,8 +282,8 @@ export class Meeseeks extends CharacterBase {
     let eyeScale = blinking ? 0.1 : 1;
     let mouthOpen = 0.35;
     let speed = 10;
-    // Hands follow the forearm unless the pose (typing) says otherwise.
-    for (const { hand } of this.arms) p.rot(hand, 0, 0, 0);
+    // Hands follow the forearm unless the pose (typing, writing) says otherwise.
+    for (const arm of this.arms) p.turn(arm.hand, palmRoll(arm));
 
     if (this.mode === 'walk') {
       this.walkPhase += dt * 9;
@@ -485,8 +497,7 @@ export class Meeseeks extends CharacterBase {
       _qArm.setFromAxisAngle(X_AXIS, lean)
         .multiply(_qJoint.setFromEuler(_euler.set(arm.x, arm.y, arm.z)))
         .multiply(_qJoint.setFromAxisAngle(X_AXIS, arm.bend));
-      _euler.setFromQuaternion(_q.premultiply(_qArm.invert()));
-      p.rot(hand, _euler.x, _euler.y, _euler.z);
+      p.turn(hand, _q.premultiply(_qArm.invert()));
     }
   }
 }
