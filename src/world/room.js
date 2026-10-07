@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PALETTE, box, cyl, glow, mesh, noInk, ownToon, rng, sphere, toon } from '../engine/toon.js';
 import { createPortal } from './portal.js';
 import { createChristmasLights } from './christmas-lights.js';
+import { createCoffeeBar } from './coffee-bar.js';
 import { CAR, HULL, HULL_Y, carColliders, hullGeometry } from './car.js';
 import { canvasTexture, glowTexture, labelTexture, neonSignTexture } from './screens.js';
 import { addCollection } from './props/index.js';
@@ -102,7 +103,9 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   neonLight.position.set(-5.6, 2.6, -5.2);
   room.add(neonLight);
 
-  room.add(coffeeBar(1.45, -5.62));
+  const coffeeBar = createCoffeeBar();
+  coffeeBar.group.position.set(1.45, 0, -5.62);
+  room.add(coffeeBar.group);
   solidBox(1.45, -5.62, 1.9, 0.66);
   room.add(plant(-3.55, -5.45, 1.25, 7));
   room.add(plant(7.35, 5.2, 1.05, 11));
@@ -189,12 +192,14 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
     tvScreen,
     wbFace,
     living,
+    coffeeBar,
     setEnclosed(on) {
       enclosure.visible = on;
     },
     /** `camera` is where you are: walking in, the living room's door opens for you. */
     update(dt, t, camera) {
       for (const u of updaters) u(dt, t);
+      coffeeBar.update(dt, t, camera);
       living.update(dt, t, camera?.position, enclosure.visible);
     },
   };
@@ -337,26 +342,6 @@ function pegboardTexture(w, h) {
   texture.repeat.set(Math.round(w / 0.05), Math.round(h / 0.05));
   texture.needsUpdate = true;
   return texture;
-}
-
-function coffeeBar(x, z) {
-  const g = new THREE.Group();
-  g.position.set(x, 0, z);
-  g.add(box(1.8, 0.9, 0.6, '#c89560', 0, 0.45, 0));
-  g.add(box(1.86, 0.05, 0.64, '#ebe6da', 0, 0.925, 0));
-  // Espresso machine.
-  g.add(box(0.46, 0.4, 0.34, '#c0c6ce', -0.45, 1.15, -0.04));
-  g.add(box(0.3, 0.06, 0.12, '#5d646e', -0.45, 1.02, 0.14));
-  g.add(cyl(0.035, 0.035, 0.05, '#fff', 10).translateX(-0.5).translateY(1.0).translateZ(0.16));
-  // Kombucha on tap.
-  g.add(cyl(0.18, 0.18, 0.5, '#8b939c', 18).translateX(0.2).translateY(1.2));
-  g.add(cyl(0.19, 0.19, 0.05, '#5d646e', 18).translateX(0.2).translateY(1.46));
-  g.add(box(0.2, 0.08, 0.02, glow('#ffd166'), 0.2, 1.22, 0.19));
-  for (let i = 0; i < 3; i++) g.add(cyl(0.04, 0.035, 0.1, ['#e74c3c', '#f5f5f5', '#3498db'][i], 12).translateX(0.55 + i * 0.12).translateY(1.0).translateZ(0.1));
-  // Fruit bowl nobody touches.
-  g.add(cyl(0.16, 0.1, 0.08, '#e8e1d2', 16).translateX(0.72).translateY(0.99).translateZ(-0.12));
-  for (let i = 0; i < 4; i++) g.add(sphere(0.045, ['#e74c3c', '#f1c40f', '#27ae60', '#e67e22'][i], 10).translateX(0.66 + (i % 2) * 0.1).translateY(1.06).translateZ(-0.15 + Math.floor(i / 2) * 0.07));
-  return g;
 }
 
 function plant(x, z, h, seed) {

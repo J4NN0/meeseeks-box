@@ -193,12 +193,15 @@ export function neonSignTexture({ title = 'MEESEEKS BOX', sub = '✦ Existence i
   return texture;
 }
 
-/** Soft radial blob, used for fake glows behind lights and the portal. */
+/**
+ * Soft radial blob, used for fake glows behind lights and the portal: `color`
+ * in the middle, fading out, or a list of `[offset, color]` stops.
+ */
 export function glowTexture(color = '#ffffff') {
   const { canvas, ctx, texture } = canvasTexture(128, 128);
   const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-  g.addColorStop(0, color);
-  g.addColorStop(1, 'rgba(0,0,0,0)');
+  const stops = Array.isArray(color) ? color : [[0, color], [1, 'rgba(0,0,0,0)']];
+  for (const [at, c] of stops) g.addColorStop(at, c);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   texture.needsUpdate = true;

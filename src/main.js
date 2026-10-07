@@ -293,6 +293,8 @@ function act(action) {
   } else if (action.kind === 'lights') {
     setChristmasLights(!christmasLightsOn());
     store.set('lights', christmasLightsOn() ? 'on' : 'off');
+  } else if (action.kind === 'coffee') {
+    here().world.room.coffeeBar.use(action.part, action.index);
   } else if (action.kind === 'box') {
     summon();
   }
@@ -684,12 +686,17 @@ function pick(ndc, maxDistance = Infinity) {
       if (d.gate) return { gate: true, action: { id: 'gate', kind: 'gate', level, label: `${name} remote · ${open ? 'ready' : 'off'}` } };
       return { action: { id: 'gate-hint', kind: 'hint', level, label: `${name} · ${open ? `${n} agent${n === 1 ? '' : 's'}` : 'empty'}` } };
     }
-    if (d.car) return { car: true, action: { id: 'car', kind: 'hood', label: 'Car' } };
-    if (d.remote) return { remote: true, action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
-    if (d.livingTv) return { tv: true, action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
-    if (d.meetingBell) return { bell: true, action: { id: 'bell', kind: 'meeting', label: multiverse.meeting ? 'Meeting bell\nring to send everyone back to work' : 'Meeting bell\nring to call everyone to the meeting room' } };
-    if (d.meeseeksBox) return { box: true, action: { id: 'box', kind: 'box', label: 'Meeseeks Box' } };
-    if (d.christmasLights) return { lights: true, action: { id: 'lights', kind: 'lights', label: `Christmas lights · ${christmasLightsOn() ? 'on' : 'off'}` } };
+    if (d.car) return { action: { id: 'car', kind: 'hood', label: 'Car' } };
+    if (d.remote) return { action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
+    if (d.livingTv) return { action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
+    if (d.meetingBell) return { action: { id: 'bell', kind: 'meeting', label: multiverse.meeting ? 'Meeting bell\nring to send everyone back to work' : 'Meeting bell\nring to call everyone to the meeting room' } };
+    if (d.meeseeksBox) return { action: { id: 'box', kind: 'box', label: 'Meeseeks Box' } };
+    if (d.coffeeBar) {
+      // Nothing to do with it (the counter, with no mug in hand): just in the way.
+      const label = world.room.coffeeBar.label(d.coffeeBar, d.coffeeIndex);
+      return label ? { action: { id: `coffee-${d.coffeeBar}-${d.coffeeIndex}`, kind: 'coffee', part: d.coffeeBar, index: d.coffeeIndex, label } } : null;
+    }
+    if (d.christmasLights) return { action: { id: 'lights', kind: 'lights', label: `Christmas lights · ${christmasLightsOn() ? 'on' : 'off'}` } };
     if (d.board) return { board: d.board, action: d.board.actionAt(hit.uv) };
     if (hit.object.isMesh && !hit.object.material.transparent) return null;
   }
@@ -732,7 +739,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     // A board's items only react once you've flown up to it.
     if (target?.board && target.board !== focusedBoard) target.action = null;
     setPointed(target);
-    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.gate || target?.car || target?.remote || target?.tv || target?.bell || target?.lights || target?.box));
+    document.body.classList.toggle('hovering', !!(target?.agent || target?.board || target?.action));
     pendingMove = null;
   });
   pendingMove = e;
