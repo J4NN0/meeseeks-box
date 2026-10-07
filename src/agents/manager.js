@@ -1,9 +1,11 @@
 import { Agent } from './agent.js';
+import { CoffeeArea } from './coffee-break.js';
 
 // Keeps one office in sync with the sessions seated in it: new sessions
 // spawn an agent, vanished ones poof. The multiverse decides who sits where
 // (and smooths over flaky polls), so whatever isn't in the list leaves now.
 // During a meeting everyone here goes to the meeting room, newcomers too.
+// Now and then someone napping at its desk goes for a coffee (coffee-break.js).
 
 const SPAWN_STAGGER_S = 1.3;
 /** Called to (or out of) a meeting, they get up one after another, this far apart. */
@@ -18,6 +20,7 @@ export class AgentManager {
     this.queue = [];
     this.spawnCooldown = 0;
     this.meeting = false;
+    this.coffee = new CoffeeArea(world);
   }
 
   /**
@@ -34,7 +37,7 @@ export class AgentManager {
     for (const agent of this.agents.values()) agent.cue = i++ * MEETING_STAGGER_S + Math.random() * 0.2;
   }
 
-  /** Everyone who's on the way to or from the meeting gets there now. */
+  /** Everyone who's on the way to or from the meeting gets there now, and anyone on a coffee break is back at their desk. */
   settleMeeting() {
     for (const agent of this.agents.values()) {
       if (agent.phase === 'rising') agent.stoodUp();
@@ -42,6 +45,7 @@ export class AgentManager {
       else if (this.meeting && agent.inMeeting && agent.phase !== 'meeting') agent.takePlace();
       else if (!this.meeting && agent.inMeeting) agent.leaveMeeting({ instant: true });
       else if (agent.returning) agent.settle(Date.now());
+      else if (agent.coffeeBreak || agent.backFromBar) agent.endBreak({ instant: true });
     }
   }
 
@@ -125,6 +129,7 @@ export class AgentManager {
       if (agent.phase === 'gone') this.agents.delete(id);
       else if (agent.phase === 'walking' || agent.phase === 'convening' || agent.phase === 'departing') this.world.passing(agent.character.root.position);
     }
+    this.coffee.tick(dt, this.agents.values(), this.meeting);
     const lounger = [...this.agents.values()].find((a) => a.phase === 'lounging');
     const desk = lounger && this.world.fillOrder.find((d) => d.free);
     if (desk) lounger.moveToDesk(desk);

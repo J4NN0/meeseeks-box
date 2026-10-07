@@ -18,8 +18,11 @@ const LOUNGE = [[-5.0, 3.1, 2.3], [-4.0, 4.2, 2.6], [-6.4, 4.4, 1.2], [5.0, 0.8,
 
 // Right of the last desk column, so walks to and from the car stay clear.
 const SIDE_AISLE_X = 4.62;
-// Behind each row of chairs, clear from one side of the garage to the other.
-const LANES = ROWS.map((z) => z + CHAIR_Z + 0.55);
+// Between the desk columns, clear from the front of the garage to the back.
+const GAPS = COLS.slice(1).map((x, i) => (x + COLS[i]) / 2);
+// Behind each row of chairs, clear from one side of the garage to the other,
+// and one in front of the back row's monitors, by the coffee bar.
+const LANES = [ROWS[0] - 0.95, ...ROWS.map((z) => z + CHAIR_Z + 0.55)];
 // Where the side aisle meets the line through the living room door.
 const HUB = new THREE.Vector3(SIDE_AISLE_X, 0, DOOR.z);
 // The garage's side of the wall to the house.
@@ -145,11 +148,18 @@ export class World {
   /**
    * From a point in the garage out to the side aisle along the lane it's on,
    * keeping clear of the desks, and if `to` is in the garage too, back in
-   * along its lane (or just along the one lane, if it's the same).
+   * along its lane (or just along the one lane, if it's the same), crossing
+   * over by whichever gap between the desks is on the way.
    */
   toAisle(p, to = null) {
     const out = openFloor(p) ? [] : [new THREE.Vector3(p.x, 0, nearestLane(p))];
-    if (to && !openFloor(to) && out.length && nearestLane(to) === out[0].z) return [...out, new THREE.Vector3(to.x, 0, out[0].z)];
+    if (to && !openFloor(to) && out.length) {
+      const lane = nearestLane(to);
+      if (lane === out[0].z) return [...out, new THREE.Vector3(to.x, 0, lane)];
+      const via = (x) => Math.abs(p.x - x) + Math.abs(x - to.x);
+      const x = [...GAPS, SIDE_AISLE_X].reduce((a, b) => (via(b) < via(a) ? b : a));
+      return [...out, new THREE.Vector3(x, 0, out[0].z), new THREE.Vector3(x, 0, lane), new THREE.Vector3(to.x, 0, lane)];
+    }
     if (out.length) out.push(new THREE.Vector3(SIDE_AISLE_X, 0, out[0].z));
     if (to && !openFloor(to)) out.push(new THREE.Vector3(SIDE_AISLE_X, 0, nearestLane(to)), new THREE.Vector3(to.x, 0, nearestLane(to)));
     return out;

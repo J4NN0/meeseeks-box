@@ -17,6 +17,10 @@ import { glowTexture } from './screens.js';
 //
 // Every part is tagged `userData.coffeeBar` (machine, mug, tap, fruit), with
 // `coffeeIndex` for which mug or fruit: `use()` runs it, `label()` names it.
+//
+// Agents on a coffee break (agents/coffee-break.js) use it too, with their
+// hands: `agents` is where they stand and what they reach for. A mug, a
+// brew or a fruit one of them has is its `owner`'s: you can't take it.
 
 const TOP = 0.95;
 const MACHINE = { x: -0.45, z: -0.04 };
@@ -54,6 +58,21 @@ const FRUITS = [
 ];
 const EAT = 0.55;
 const REGROW = 30;
+
+/**
+ * Where agents stand, on the floor in front of the counter: at the counter,
+ * the mugs and the fruit within reach of their right hand; at the machine;
+ * and round the front of the bar to drink and chat, the middle one first.
+ */
+const STANDS = {
+  counter: [0.8, 0.67],
+  machine: [-0.3, 0.67],
+  hang: [[0.15, 0.98], [-0.7, 1.18], [1.0, 1.18]],
+};
+/** In front of the button on the machine's panel, where a hand goes to press it. */
+const BUTTON = new THREE.Vector3(MACHINE.x, TOP + 0.375, MACHINE.z + 0.21);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 const COFFEE = '#4a2a14';
 const KOMBUCHA = '#e7a43b';
@@ -235,7 +254,8 @@ export function createCoffeeBar() {
   });
 
   // Doing things -------------------------------------------------------------------
-  const brew = { state: 'idle', mug: null, t: 0, buzz: 0 };
+  // `owner`: the agent making it, or null for yours.
+  const brew = { state: 'idle', mug: null, owner: null, t: 0, buzz: 0 };
   let nudge = 0;
 
   const held = () => mugs.find((m) => m.state === 'held');
@@ -244,6 +264,8 @@ export function createCoffeeBar() {
   function use(part, index) {
     if (part === 'machine') {
       const mug = held();
+      // Someone else's coffee.
+      if (brew.owner) return;
       if (brew.state === 'ready') drinkUp(mugs[brew.mug]);
       // A mug in place: now it makes the coffee.
       else if (brew.state === 'placed') Object.assign(brew, { state: 'grind', t: 0 });
@@ -255,7 +277,9 @@ export function createCoffeeBar() {
       }
     } else if (part === 'mug') {
       const mug = mugs[index];
-      if (mug.state === 'home') {
+      if (mug.owner) {
+        if (mug.state === 'machine') mug.wiggle = 0.5;
+      } else if (mug.state === 'home') {
         const other = held();
         if (other) putBack(other);
         mug.state = 'held';
@@ -294,6 +318,7 @@ export function createCoffeeBar() {
     if (part === 'machine') return `Espresso machine${{ placed: ' · mug in place', grind: ' · grinding', pour: ' · brewing', ready: ' · coffee ready' }[brew.state] || ''}`;
     if (part === 'mug') {
       const mug = mugs[index];
+      if (mug.owner) return 'Mug · in use';
       if (mug.state === 'held') return 'Mug · in hand';
       if (mug.state === 'machine') return { placed: 'Mug · on the machine', ready: 'Mug · coffee ready' }[brew.state] || 'Mug · brewing';
       return 'Mug';
@@ -304,6 +329,136 @@ export function createCoffeeBar() {
     if (part === 'counter') return held() ? 'Coffee bar' : '';
     return '';
   }
+
+  // For agents --------------------------------------------------------------------
+  // Everything they're given and give back is in world space.
+
+  const hand = { at: new THREE.Vector3(), turn: new THREE.Quaternion(), tip: new THREE.Quaternion(), up: new THREE.Vector3(), bar: new THREE.Quaternion() };
+  const world = (x, y, z) => {
+    g.updateWorldMatrix(true, false);
+    return g.localToWorld(new THREE.Vector3(x, y, z));
+  };
+  /** The bar's turn about y in the room. */
+  const barYaw = () => new THREE.Euler().setFromQuaternion(g.getWorldQuaternion(hand.bar), 'YXZ').y;
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const mugMiddle = (mug) => {
+    mug.group.updateWorldMatrix(true, false);
+    return mug.group.localToWorld(new THREE.Vector3(0, MUG.h / 2, 0));
+  };
+
+  /** Out of an agent's hand and standing up: its turn in the hand goes into the cup's own, so it doesn't spin round. */
+  function unhand(mug) {
+    if (!mug.inHand) return;
+    mug.inHand = false;
+    mug.cup.rotation.y = wrap(mug.cup.rotation.y + new THREE.Euler().setFromQuaternion(mug.group.quaternion, 'YXZ').y);
+    mug.group.quaternion.identity();
+  }
+
+  const agents = {
+    /** Where they stand (`hang`: a list), and which way faces the counter. */
+    stands() {
+      const at = ([x, z]) => world(x, 0, z);
+      return { counter: at(STANDS.counter), machine: at(STANDS.machine), hang: STANDS.hang.map(at), facing: barYaw() + Math.PI };
+    },
+    /** A clean mug off the counter, for `owner`: its index, or -1 if there's none. */
+    takeMug(owner) {
+      const mug = mugs.find((m) => m.state === 'home' && !m.owner);
+      if (!mug) return -1;
+      Object.assign(mug, { state: 'agent', owner, fill: 0 });
+      return mugs.indexOf(mug);
+    },
+    /** Where mug `i`'s middle is now, and where it is when it's back on its spot. */
+    mugAt: (i) => mugMiddle(mugs[i]),
+    mugHome: (i) => world(mugs[i].home.x, TOP + MUG.h / 2, mugs[i].home.z),
+    /** Mug `i` in a hand: its middle `at`, facing `yaw` (about y, in the room) and tipped back by `tilt` to drink. */
+    holdMug(i, at, yaw, tilt = 0) {
+      const mug = mugs[i];
+      hand.turn.setFromAxisAngle(Y_AXIS, yaw).multiply(hand.tip.setFromAxisAngle(X_AXIS, -tilt));
+      hand.up.set(0, 1, 0).applyQuaternion(hand.turn);
+      g.updateWorldMatrix(true, false);
+      g.worldToLocal(hand.at.copy(at).addScaledVector(hand.up, -MUG.h / 2));
+      g.getWorldQuaternion(hand.bar).invert();
+      if (!mug.inHand) {
+        // Picked up: it turns in the hand, its handle to the fingers, rather than all at once.
+        mug.inHand = true;
+        mug.cup.rotation.y = wrap(mug.cup.rotation.y - (yaw - barYaw()));
+      }
+      mug.group.position.copy(hand.at);
+      mug.group.quaternion.copy(hand.bar).multiply(hand.turn);
+    },
+    /** How much coffee is left in it, 0 to 1. */
+    fillMug(i, fill) { mugs[i].fill = THREE.MathUtils.clamp(fill, 0, 1); },
+    /** Back on its spot, empty. */
+    returnMug(i) {
+      const mug = mugs[i];
+      unhand(mug);
+      Object.assign(mug, { state: 'home', owner: null, fill: 0 });
+    },
+    /** Nobody's using the machine. */
+    machineFree: () => brew.state === 'idle',
+    /** Where a mug's middle goes to stand under the spouts, and the button that starts it. */
+    trayAt: () => world(UNDER_SPOUT.x, UNDER_SPOUT.y + MUG.h / 2, UNDER_SPOUT.z),
+    buttonAt: () => world(BUTTON.x, BUTTON.y, BUTTON.z),
+    /** Mug `i` under the spouts, if the machine's free. */
+    placeMug(i, owner) {
+      if (brew.state !== 'idle') return false;
+      const mug = mugs[i];
+      unhand(mug);
+      mug.state = 'machine';
+      Object.assign(brew, { state: 'placed', mug: i, owner, t: 0 });
+      return true;
+    },
+    /** The button: it grinds, then pours. */
+    startBrew(owner) {
+      if (brew.owner === owner && brew.state === 'placed') Object.assign(brew, { state: 'grind', t: 0 });
+    },
+    /** How `owner`'s coffee is coming along (placed, grind, pour, ready), or null. */
+    brewOf: (owner) => (brew.owner === owner ? brew.state : null),
+    /** The coffee, off the machine and into its hand. */
+    collectMug(i, owner) {
+      if (brew.owner !== owner || brew.state !== 'ready') return false;
+      mugs[i].state = 'agent';
+      Object.assign(brew, { state: 'idle', mug: null, owner: null });
+      return true;
+    },
+    /** A fruit from the bowl, for `owner`: its index, or -1 if the bowl's empty. */
+    takeFruit(owner) {
+      const fruit = fruits.find((f) => f.state === 'bowl');
+      if (!fruit) return -1;
+      Object.assign(fruit, { state: 'agent', owner });
+      return fruits.indexOf(fruit);
+    },
+    fruitAt(i) {
+      fruits[i].group.updateWorldMatrix(true, false);
+      return fruits[i].group.getWorldPosition(new THREE.Vector3());
+    },
+    /** Fruit `i` in a hand, its middle `at`, `size` of it left. */
+    holdFruit(i, at, size) {
+      const f = fruits[i].group;
+      bowl.updateWorldMatrix(true, false);
+      f.position.copy(bowl.worldToLocal(hand.at.copy(at)));
+      f.scale.setScalar(Math.max(0.001, size));
+    },
+    /** All gone: it grows back in the bowl later. */
+    ateFruit(i) {
+      Object.assign(fruits[i], { state: 'gone', owner: null, t: 0 });
+      fruits[i].group.visible = false;
+    },
+    /** Called away: whatever `owner` has goes back where it came from. */
+    release(owner) {
+      for (const mug of mugs) {
+        if (mug.owner !== owner) continue;
+        unhand(mug);
+        Object.assign(mug, { state: 'home', owner: null, fill: 0 });
+      }
+      if (brew.owner === owner) Object.assign(brew, { state: 'idle', mug: null, owner: null });
+      for (const f of fruits) {
+        if (f.owner !== owner) continue;
+        Object.assign(f, { state: 'grow', owner: null, t: 0 });
+        f.group.position.copy(f.base);
+      }
+    },
+  };
 
   // Scratch space for placing mugs in front of the camera.
   const where = new THREE.Vector3();
@@ -355,7 +510,11 @@ export function createCoffeeBar() {
       // Where it's headed: its spot, the drip tray, your hand or your lips.
       let tilt = 0;
       let follow = 9;
-      if (mug.state === 'home') {
+      // In an agent's hand it goes where the hand puts it (agents.holdMug).
+      const agent = mug.state === 'agent';
+      if (agent) {
+        // Nowhere: it stays put.
+      } else if (mug.state === 'home') {
         where.copy(mug.home);
         facing.identity();
       } else if (mug.state === 'machine') {
@@ -380,30 +539,31 @@ export function createCoffeeBar() {
         }
       }
       const ease = 1 - Math.exp(-follow * dt);
-      mug.group.position.lerp(where, ease);
-      mug.group.quaternion.slerp(facing, ease);
+      if (!agent) {
+        mug.group.position.lerp(where, ease);
+        mug.group.quaternion.slerp(facing, ease);
+      }
       mug.tilt.rotation.x = THREE.MathUtils.damp(mug.tilt.rotation.x, tilt, 10, dt);
-      // On the counter it stands as it was put down; off it, its handle's to your right.
+      // On the counter it stands as it was put down; off it, its handle's to
+      // your right, or in the fingers of the agent holding it.
       const away = mug.state === 'held' || mug.state === 'drink';
-      mug.cup.rotation.y = THREE.MathUtils.damp(mug.cup.rotation.y, away ? -0.5 : mug.state === 'machine' ? -0.4 : mug.yaw, 8, dt);
+      const yaw = away ? -0.5 : mug.state === 'machine' ? -0.4 : mug.inHand ? 0 : mug.yaw;
+      mug.cup.rotation.y = THREE.MathUtils.damp(mug.cup.rotation.y, yaw, 8, dt);
       mug.grip.visible = mug.state === 'home';
       if (away !== mug.away) {
         mug.away = away;
         for (const o of mug.casters) o.castShadow = !away;
       }
-      // On its way to your lips it fills the middle of the view: aim through it.
-      const drinking = mug.state === 'drink';
-      if (drinking !== mug.drinking) {
-        mug.drinking = drinking;
-        mug.group.traverse((o) => { if (o.isMesh) o.raycast = drinking ? noRaycast : THREE.Mesh.prototype.raycast; });
-      }
+      // On its way to your lips it fills the middle of the view: aim through
+      // it. In an agent's hand, a click is for the agent.
+      ghost(mug, mug.state === 'drink' || agent);
       if (mug.wiggle) {
         mug.wiggle = Math.max(0, mug.wiggle - dt);
         mug.tilt.rotation.z = Math.sin(mug.wiggle * 40) * 0.12 * mug.wiggle * 2;
       }
       mug.coffee.visible = mug.fill > 0.01;
       mug.coffee.scale.y = Math.max(0.001, mug.fill * (MUG.h - MUG.floor - 0.012));
-      mug.puffs.userData.puff(t, mug.state === 'machine' ? mug.fill : 0);
+      mug.puffs.userData.puff(t, mug.state === 'machine' ? mug.fill : agent ? mug.fill * 0.6 : 0);
     }
 
     // The kombucha: pull the tap, the glass fills; then you drink it.
@@ -438,6 +598,7 @@ export function createCoffeeBar() {
     // The fruit: eaten in a hop and a spin; it grows back in the bowl later.
     for (const f of fruits) {
       f.t += dt;
+      ghost(f, f.state === 'agent');
       if (f.state === 'eat') {
         const k = Math.min(1, f.t / EAT);
         f.group.position.set(f.base.x, f.base.y + Math.sin(k * Math.PI) * 0.18, f.base.z);
@@ -460,10 +621,17 @@ export function createCoffeeBar() {
     }
   }
 
-  return { group: g, use, label, update };
+  return { group: g, use, label, update, agents };
 }
 
 function noRaycast() {}
+
+/** Clicks go straight through a mug or a fruit (`on`), or hit it again. */
+function ghost(item, on) {
+  if (item.ghost === on) return;
+  item.ghost = on;
+  item.group.traverse((o) => { if (o.isMesh) o.raycast = on ? noRaycast : THREE.Mesh.prototype.raycast; });
+}
 
 /** Soft white, fading out from the middle. */
 let puffTexture = null;

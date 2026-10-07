@@ -29,7 +29,8 @@ const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 
  *
  * Called to a meeting (`joinMeeting`), it gets up and walks through the
  * house to its place in the meeting room, keeping its desk; sent back
- * (`leaveMeeting`), it walks back and sits down at it again.
+ * (`leaveMeeting`), it walks back and sits down at it again. Napping at its
+ * desk, now and then it gets up for a coffee (`takeBreak`) and comes back.
  */
 export class Agent {
   constructor(session, world, { mode, onClick, now, instant = false, entry = 'box' }) {
@@ -48,6 +49,12 @@ export class Agent {
     this.place = null;
     // Walking back from a meeting.
     this.returning = false;
+    // On a coffee break (a CoffeeBreak, see coffee-break.js), or walking back
+    // from one; and how long it's been asleep at its desk (it's sent for a
+    // coffee now and then, and it's below 0 for a while after one).
+    this.coffeeBreak = null;
+    this.backFromBar = false;
+    this.napped = 0;
     // Seconds until it goes to (or back from) a meeting it was called to.
     this.cue = 0;
     // Getting up from a chair ('rising'): the phase to walk off in, and the
@@ -126,15 +133,16 @@ export class Agent {
     }
     this.chair = this.desk;
     this.returning = false;
+    this.backFromBar = false;
     this.speed = WALK_SPEED;
     for (let i = 0; i < 15; i++) c.update(0.1, i * 0.1);
   }
 
   // -------------------------------------------------------------- meetings
 
-  /** Free to answer a meeting call: at or on its way to its desk, or lounging. */
+  /** Free to answer a meeting call: at or on its way to its desk, lounging, or at the coffee bar. */
   get canJoin() {
-    return !this.place && ['walking', 'turning', 'sitting', 'seated', 'lounging'].includes(this.phase);
+    return !this.place && ['walking', 'turning', 'sitting', 'seated', 'lounging', 'coffee'].includes(this.phase);
   }
 
   /** In the meeting, or on its way there (not leaving for good). */
@@ -150,8 +158,11 @@ export class Agent {
    */
   joinMeeting(place, { instant = false } = {}) {
     const atDesk = this.desk && ['turning', 'sitting', 'seated'].includes(this.phase);
+    // At the coffee bar, it puts everything back first.
+    this.leaveBar();
     this.place = place;
     this.returning = false;
+    this.backFromBar = false;
     if (instant) {
       this.getUp();
       this.takePlace();
@@ -196,7 +207,7 @@ export class Agent {
       this.place = null;
     }
     this.chair = next;
-    this.speed = MEETING_SPEED;
+    this.speed = after === 'coffee' ? WALK_SPEED : MEETING_SPEED;
     this.setPhase(after);
   }
 
@@ -336,6 +347,54 @@ export class Agent {
     this.chair.holdCup(null);
   }
 
+  // ---------------------------------------------------------- coffee breaks
+
+  /** Asleep at its desk, and a Meeseeks: the others don't reach the counter. */
+  get canTakeBreak() {
+    return this.phase === 'seated' && this.visualStatus === 'sleeping' && this.kind === 'meeseeks' && !this.place && !this.coffeeBreak;
+  }
+
+  /** Up out of its chair and off to the coffee bar, for `coffeeBreak` (coffee-break.js). */
+  takeBreak(coffeeBreak) {
+    this.coffeeBreak = coffeeBreak;
+    this.say(line(this.kind, 'break'), 2.4);
+    this.rise(coffeeBreak.start(this.desk.approachWorld()), 'coffee', this.desk);
+  }
+
+  /**
+   * Back to its desk: the break's over, or it's `called` back (its session
+   * woke up), or straight there if `instant` (an office you aren't looking at).
+   */
+  endBreak({ instant = false, called = false } = {}) {
+    if (!this.coffeeBreak && !this.backFromBar) return;
+    const rising = this.phase === 'rising';
+    this.leaveBar();
+    if (instant) {
+      this.settle(Date.now());
+      return;
+    }
+    // Called back before it was even out of its chair: it stays put.
+    if (rising) {
+      this.rising = null;
+      this.setPhase('seated');
+      return;
+    }
+    if (this.phase !== 'coffee') return;
+    this.target = this.desk.approachWorld();
+    this.path = this.world.route(this.character.root.position.clone(), this.target);
+    this.chair = this.desk;
+    this.speed = WALK_SPEED;
+    this.backFromBar = true;
+    this.setPhase('walking');
+    this.say(line(this.kind, called ? 'backToWork' : 'breakOver'), 2.2);
+  }
+
+  /** Everything it had at the coffee bar back where it came from, and its spot there free. */
+  leaveBar() {
+    this.coffeeBreak?.release();
+    this.coffeeBreak = null;
+  }
+
   makeCharacter(kind) {
     const c = createMascot(kind, { provider: this.session.provider, seed: this.session.id });
     c.tag(this.id);
@@ -447,6 +506,7 @@ export class Agent {
     }
     this.prevPhase = this.phase;
     if (this.chair && this.chair !== this.desk) this.putDownCup();
+    this.leaveBar();
     this.phase = 'leaving';
     this.phaseTime = 0;
     // Poofs right here, saying why: the session ended (or, out of the box,
@@ -458,8 +518,10 @@ export class Agent {
   depart() {
     const root = this.character.root;
     // Back to the aisle behind the chairs first, not through the next chair.
-    const away = this.place || this.returning;
+    const away = this.place || this.returning || this.backFromBar || this.phase === 'coffee';
     this.rising = null;
+    this.leaveBar();
+    this.backFromBar = false;
     const aisle = this.desk && !away ? this.desk.approachWorld() : root.getWorldPosition(new THREE.Vector3());
     this.getUp();
     this.chair = null;
@@ -492,6 +554,8 @@ export class Agent {
   setMascot(mode) {
     const kind = mascotKind(mode, this.session);
     if (kind === this.kind || this.phase === 'leaving' || this.phase === 'gone') return;
+    // Only a Meeseeks reaches the coffee bar's counter.
+    this.endBreak();
     const old = this.character;
     const next = this.makeCharacter(kind);
     old.root.parent.add(next.root);
@@ -540,6 +604,10 @@ export class Agent {
       if (this.phase === 'seated' || this.phase === 'lounging' || this.phase === 'meeting') this.onStatusChange(prev, status);
     }
     this.lastStatus = status;
+    // Asleep at its desk, it may fancy a coffee; at the coffee bar, it's back
+    // to its desk as soon as it's needed.
+    if (this.phase === 'seated') this.napped = status === 'sleeping' ? this.napped + dt : Math.min(this.napped, 0);
+    if (this.phase === 'coffee' && status !== 'sleeping') this.endBreak({ called: true });
 
     switch (this.phase) {
       case 'arriving': {
@@ -559,6 +627,7 @@ export class Agent {
         c.setMode('walk');
         if (this.walkPath(dt)) {
           this.returning = false;
+          this.backFromBar = false;
           this.speed = WALK_SPEED;
           this.setPhase(this.desk ? 'turning' : 'lounging');
           break;
@@ -571,6 +640,10 @@ export class Agent {
         c.setMode('sit');
         c.setMood('idle');
         if (this.phaseTime > RISE_S) this.stoodUp();
+        break;
+      }
+      case 'coffee': {
+        if (this.coffeeBreak.tick(dt)) this.endBreak();
         break;
       }
       case 'convening': {
@@ -706,6 +779,7 @@ export class Agent {
 
     c.update(dt, t);
     if (this.sipT >= 0) this.holdCup();
+    this.coffeeBreak?.place();
     for (const h of this.helpers) {
       h.character.setMood(h.mood);
       h.character.update(dt, t);
@@ -713,7 +787,7 @@ export class Agent {
 
     if (this.desk && this.phase !== 'gone') {
       // Off in a meeting, its desk carries on showing what the session's doing.
-      const live = this.phase === 'seated' || this.phase === 'leaving' || this.inMeeting;
+      const live = this.phase === 'seated' || this.phase === 'leaving' || this.inMeeting || !!this.coffeeBreak;
       const deskStatus = live ? status : null;
       this.desk.setStatus(deskStatus, deskStatus ? STATUS_COLORS[deskStatus] : null);
       if (live) this.desk.screen.draw(this.session, status, now, t);
@@ -845,6 +919,7 @@ export class Agent {
 
   destroy() {
     this.phase = 'gone';
+    this.leaveBar();
     this.label.removeFromParent();
     this.label.element.remove();
     for (const h of this.helpers) h.character.dispose();
@@ -882,7 +957,7 @@ export class Agent {
     }
     // On its way to the meeting, it's off somewhere between the two; just
     // out of the box, it's still beside it.
-    if (this.desk && this.phase !== 'convening' && this.phase !== 'arriving') {
+    if (this.desk && this.phase !== 'convening' && this.phase !== 'arriving' && this.phase !== 'coffee' && !this.backFromBar) {
       // Over the shoulder and a bit high, so the head doesn't hide the screen.
       // Looking slightly right of the monitor keeps it clear of the side panel.
       const look = this.desk.root.localToWorld(new THREE.Vector3(0.55, 1.15, -0.2));

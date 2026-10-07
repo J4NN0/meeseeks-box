@@ -263,6 +263,16 @@ export class CharacterBase {
     this.written = 0;
     this.cupHand = null;
     this.cupOffset = new THREE.Vector3();
+
+    // On its feet at the coffee bar, its cup hand busy: reaching for
+    // something (`grab`, where the hand goes, in its own frame), or holding
+    // a mug or a fruit (`carrying`, `cupOffset` from the hand), up at its
+    // mouth as `sip` goes to 1. `chew` works its jaw; with `gesture` on it
+    // talks with its other hand.
+    this.grab = null;
+    this.carrying = false;
+    this.chew = false;
+    this.gesture = false;
   }
 
   /** Sat down at a meeting table (its `{ pad, cup }`), or back at a desk (null). */

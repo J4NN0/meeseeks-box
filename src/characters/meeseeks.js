@@ -33,6 +33,13 @@ const MOUTH_CUP = new THREE.Vector3(0.02, 1.14, 0.3);
 const WRITE_POLE = new THREE.Vector3(0.7, -0.5, -0.4);
 const CUP_POLE = new THREE.Vector3(0.9, -0.6, 0.1);
 const REST_POLE = new THREE.Vector3(0.8, -0.5, -0.3);
+// Standing at the coffee bar: the middle of what's in its cup hand, carried
+// in front of it or up at its mouth. Reaching over the counter, its elbow
+// points out and down, and it leans in for what's further away.
+const CARRY = new THREE.Vector3(0.09, 1.13, 0.26);
+const MOUTH_STAND = new THREE.Vector3(MOUTH_CUP.x, MOUTH_CUP.y + HIP_STAND - HIP_SIT, MOUTH_CUP.z);
+const GRAB_POLE = new THREE.Vector3(0.8, -0.6, -0.2);
+const LEAN = { from: 0.35, per: 0.75, max: 0.62 };
 const _target = new THREE.Vector3();
 const _upper = new THREE.Vector3();
 const _roll = new THREE.Quaternion();
@@ -295,6 +302,8 @@ export class Meeseeks extends CharacterBase {
       p.rot(L.shoulder, -sw * 0.5, 0, -0.12).rot(L.elbow, -0.35, 0, 0);
       p.rot(R.shoulder, sw * 0.5, 0, 0.12).rot(R.elbow, -0.35, 0, 0);
       p.rot(this.chest, 0.06, sw * 0.08, 0).rot(this.head, -0.05, 0, Math.sin(w) * 0.04);
+      // Carrying its coffee, it keeps that hand still.
+      if (this.carrying) this.reach(p, R, _reach.copy(CARRY).sub(this.cupOffset), 0.06, CUP_POLE, HIP_STAND);
       mouthOpen = 0.5;
       speed = 16;
     } else if (this.mode === 'stand') {
@@ -310,10 +319,13 @@ export class Meeseeks extends CharacterBase {
         p.rot(this.chest, -0.08, 0, 0).rot(this.head, -0.15, 0, Math.sin(time * 5) * 0.08);
         mouthOpen = 1;
         speed = 14;
+      } else if (this.grab || this.carrying) {
+        this.handsPose(p, time, L, R, breath);
       } else {
         p.rot(L.shoulder, breath, 0, -0.14).rot(L.elbow, -0.2, 0, 0);
         p.rot(R.shoulder, breath, 0, 0.14).rot(R.elbow, -0.2, 0, 0);
         p.rot(this.chest, breath, 0, 0).rot(this.head, 0, Math.sin(time * 0.7) * 0.3, 0);
+        this.freeHand(p, time, L, breath);
       }
     } else {
       // Sitting: thighs forward, shins down.
@@ -327,6 +339,7 @@ export class Meeseeks extends CharacterBase {
     }
 
     if (this.talking) mouthOpen = 0.35 + Math.abs(Math.sin(time * 14)) * 0.65;
+    if (this.chew) mouthOpen = 0.15 + Math.abs(Math.sin(time * 11)) * 0.75;
     // Slapped: eyes screwed shut and an "O" of a mouth, then wide-eyed and
     // seeing stars (even if it was napping).
     if (this.flinching) {
@@ -458,9 +471,45 @@ export class Meeseeks extends CharacterBase {
     this.reach(p, arm, _reach.set(cup.x - 0.1, pad.y + 0.03, cup.z - 0.08), lean, REST_POLE);
   }
 
-  /** Puts `arm`'s hand at `target` (in its own frame), the elbow towards `pole`, with the chest leaning by `lean`. */
-  reach(p, { shoulder, elbow, s }, target, lean, pole) {
-    _target.set(target.x, target.y - HIP_SIT - CHEST_Y, target.z).applyAxisAngle(X_AXIS, -lean);
+  /**
+   * On its feet at the coffee bar, its cup hand busy: reaching over the
+   * counter (`grab`), leaning in if it's far, eyes on it; or holding a mug or
+   * a fruit in front of it, up at its mouth as `sip` goes to 1, head back.
+   */
+  handsPose(p, time, L, R, breath) {
+    let lean = 0;
+    let nod;
+    if (this.grab) {
+      lean = THREE.MathUtils.clamp((this.grab.z - LEAN.from) / LEAN.per, 0, LEAN.max);
+      nod = 0.4;
+      this.reach(p, R, this.grab, lean, GRAB_POLE, HIP_STAND);
+    } else {
+      _reach.copy(CARRY).lerp(MOUTH_STAND, this.sip).sub(this.cupOffset);
+      nod = 0.18 - this.sip * 0.4;
+      this.reach(p, R, _reach, 0, CUP_POLE, HIP_STAND);
+    }
+    p.rot(this.chest, lean + breath, 0, 0).rot(this.head, nod, Math.sin(time * 0.7) * 0.12 * (1 - this.sip), 0);
+    this.freeHand(p, time, L, breath);
+  }
+
+  /** Its other hand, at the coffee bar: down by its side, or talking along with it (`gesture`). */
+  freeHand(p, time, L, breath) {
+    if (!this.gesture) return;
+    if (this.talking) {
+      const g = Math.sin(time * 5.5);
+      p.rot(L.shoulder, -0.7 + g * 0.2, 0.25, -0.32 - g * 0.08).rot(L.elbow, -1.25 + Math.sin(time * 8.5) * 0.3, 0, 0);
+    } else {
+      p.rot(L.shoulder, breath, 0, -0.14).rot(L.elbow, -0.2, 0, 0);
+    }
+  }
+
+  /**
+   * Puts `arm`'s hand at `target` (in its own frame), the elbow towards
+   * `pole`, with the chest leaning by `lean`: sitting, or with its hips at
+   * `hipY` standing.
+   */
+  reach(p, { shoulder, elbow, s }, target, lean, pole, hipY = HIP_SIT) {
+    _target.set(target.x, target.y - hipY - CHEST_Y, target.z).applyAxisAngle(X_AXIS, -lean);
     _target.x -= s * SHOULDER.x;
     _target.y -= SHOULDER.y;
     _pole.set(s * pole.x, pole.y, pole.z);
