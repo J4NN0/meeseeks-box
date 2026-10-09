@@ -6,7 +6,6 @@ import * as THREE from 'three';
 export const PALETTE = {
   ink: '#1c1714',
   floor: '#a9ab9b',
-  floorStain: '#8f9283',
   wall: '#b9c7bd',
   wallDark: '#95a69b',
   wallTrim: '#6f7f76',

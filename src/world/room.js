@@ -49,16 +49,6 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   room.add(box(16.3, 0.12, 0.06, theme.wallTrim, 0.15, 0.06, -5.97, { cast: false }));
   room.add(box(0.06, 0.12, 12.3, theme.wallTrim, -7.97, 0.06, 0.15, { cast: false }));
 
-  // Oil stains, because it is still a garage.
-  const stains = [[5.2, -2.6, 0.55], [6.8, -3.4, 0.35], [-6.2, -2.2, 0.3], [2.4, 4.6, 0.25], [-2.8, 2.9, 0.2]];
-  for (const [x, z, r] of stains) {
-    const s = mesh(new THREE.CircleGeometry(r, 20), toon(PALETTE.floorStain), { cast: false });
-    s.rotation.x = -Math.PI / 2;
-    s.scale.set(1, 0.7, 1);
-    s.position.set(x, 0.004, z);
-    room.add(s);
-  }
-
   room.add(garageDoor(4.7, -5.98, theme));
   room.add(spaceCruiser(CAR.x, CAR.z, CAR.rot));
   colliders.push(...carColliders());
