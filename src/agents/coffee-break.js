@@ -135,7 +135,7 @@ export class CoffeeArea {
     if (!free.length) return;
     const who = free[Math.floor(Math.random() * free.length)];
     const reply = !!this.last && !this.last.reply && this.clock - this.last.at < 5 && Math.random() < 0.65;
-    who.say(line(who.kind, reply ? 'chatReply' : 'chat'), reply ? 2 : 2.8);
+    who.say(line(reply ? 'chatReply' : 'chat'), reply ? 2 : 2.8);
     this.last = { agent: who, at: this.clock, reply };
     this.chatIn = rand(3, 4.6);
   }
@@ -264,7 +264,7 @@ export class CoffeeBreak {
         else {
           if (!this.had.coffee) {
             this.had.coffee = true;
-            a.say(line(a.kind, 'noMug'), 2);
+            a.say(line('noMug'), 2);
           }
           this.takeFruit();
         }
@@ -302,7 +302,7 @@ export class CoffeeBreak {
         if (bar.brewOf(a) !== 'ready') break;
         if (this.cheer === undefined) {
           this.cheer = this.t;
-          a.say(line(a.kind, 'coffee'), 1.8);
+          a.say(line('coffee'), 1.8);
         }
         c.setMood('cheer');
         if (this.t - this.cheer > 0.9) this.setStep('collect');
@@ -406,7 +406,7 @@ export class CoffeeBreak {
     const c = this.agent.character;
     if (this.bites === undefined) {
       this.bites = { done: 0, t: -rand(0.4, 1) };
-      this.agent.say(line(this.agent.kind, 'fruit'), 1.6);
+      this.agent.say(line('fruit'), 1.6);
     }
     const b = this.bites;
     b.t += dt;

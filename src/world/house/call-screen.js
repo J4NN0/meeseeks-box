@@ -27,7 +27,7 @@ class CallBoard extends Board {
   /** `call` is { level, name, color, agents } with agents as the multiverse roster lists them. */
   draw(call, now) {
     const blink = Math.floor(now / 1000) % 2;
-    const key = JSON.stringify([call.level, call.name, blink, call.agents.map((a) => [a.id, a.kind, a.colorHex, a.visualStatus, a.session.project, doing(a)])]);
+    const key = JSON.stringify([call.level, call.name, blink, call.agents.map((a) => [a.id, a.colorHex, a.visualStatus, a.session.project, doing(a)])]);
     if (!this.begin(key, [call, now])) return;
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
@@ -91,7 +91,7 @@ class CallBoard extends Board {
     const size = Math.min(wide ? h * 0.36 : h * 0.24, w * 0.22);
     const cx = wide ? x + 22 + size * 1.15 : x + w / 2;
     const cy = wide ? y + h / 2 : y + 16 + size * 1.3;
-    drawFace(ctx, a.kind, a.colorHex, status, cx, cy, size);
+    drawFace(ctx, a.colorHex, status, cx, cy, size);
 
     const tx = wide ? cx + size * 1.4 + 14 : x + 14;
     const tw = wide ? x + w - 14 - tx : w - 28;
@@ -133,8 +133,8 @@ function shade(hex, l) {
   return `#${new THREE.Color(hex).offsetHSL(0, 0, l).getHexString()}`;
 }
 
-/** The mascot's face, cartoon style, pulling the face its status calls for. */
-function drawFace(ctx, kind, color, status, cx, cy, r) {
+/** A Meeseeks' face, cartoon style, pulling the face its status calls for. */
+function drawFace(ctx, color, status, cx, cy, r) {
   const asleep = status === 'sleeping';
   const panic = status === 'stressed';
   const calling = status === 'waiting';
@@ -177,75 +177,25 @@ function drawFace(ctx, kind, color, status, cx, cy, r) {
   };
   const look = status === 'working' ? r * 0.06 : 0;
 
-  if (kind === 'clawd') {
-    // A blocky little critter: square body, nub arms, square eyes.
-    ctx.fillStyle = color;
-    for (const s of [-1, 1]) {
-      ctx.beginPath();
-      ctx.rect(cx + s * r * 0.95 - r * 0.2, cy - r * 0.05, r * 0.4, r * 0.3);
-      outline();
-    }
+  // Mr. Meeseeks: big round head, ears, one tuft.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.14, cy - r * 0.97);
+  ctx.quadraticCurveTo(cx + r * 0.02, cy - r * 1.42, cx + r * 0.22, cy - r * 1.3);
+  ctx.quadraticCurveTo(cx + r * 0.08, cy - r * 1.16, cx + r * 0.16, cy - r * 0.97);
+  outline();
+  ctx.fillStyle = shade(color, -0.1);
+  for (const s of [-1, 1]) {
     ctx.beginPath();
-    ctx.roundRect(cx - r * 0.85, cy - r * 0.8, r * 1.7, r * 1.55, r * 0.12);
+    ctx.ellipse(cx + s * r * 0.97, cy - r * 0.02, r * 0.16, r * 0.22, 0, 0, Math.PI * 2);
     outline();
-    ctx.fillStyle = INK;
-    for (const s of [-1, 1]) {
-      if (asleep) {
-        ctx.fillRect(cx + s * r * 0.36 - r * 0.15, cy - r * 0.2, r * 0.3, r * 0.07);
-      } else {
-        const ew = panic ? r * 0.28 : r * 0.2;
-        ctx.fillRect(cx + s * r * 0.36 - ew / 2, cy - r * 0.38 + look, ew, r * 0.36);
-      }
-    }
-    if (calling || panic) mouth(cx, cy + r * 0.38, r * 0.2);
-  } else if (kind === 'butterbot') {
-    // A grey dome on a little chassis, one big lens for an eye.
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(cx - r * 0.75, cy + r * 0.15, r * 1.5, r * 0.75, r * 0.12);
-    outline();
-    ctx.fillStyle = '#c9ced6';
-    ctx.beginPath();
-    ctx.arc(cx, cy + r * 0.15, r * 0.82, Math.PI, 0);
-    ctx.closePath();
-    outline();
-    ctx.beginPath();
-    ctx.moveTo(cx + r * 0.3, cy - r * 0.6);
-    ctx.lineTo(cx + r * 0.45, cy - r * 1.0);
-    ctx.stroke();
-    ctx.fillStyle = '#ff5b5b';
-    ctx.beginPath();
-    ctx.arc(cx + r * 0.45, cy - r * 1.0, r * 0.1, 0, Math.PI * 2);
-    outline();
-    ctx.fillStyle = '#2b2e33';
-    ctx.beginPath();
-    ctx.arc(cx, cy - r * 0.22, r * 0.36, 0, Math.PI * 2);
-    outline();
-    ctx.fillStyle = asleep ? '#4a5260' : panic ? '#ff6b5b' : calling ? STATUS_COLORS.waiting : '#9fe8ff';
-    ctx.beginPath();
-    ctx.arc(cx, cy - r * 0.22 + look, r * (asleep ? 0.1 : 0.18), 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    // Mr. Meeseeks: big round head, ears, one tuft.
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(cx - r * 0.14, cy - r * 0.97);
-    ctx.quadraticCurveTo(cx + r * 0.02, cy - r * 1.42, cx + r * 0.22, cy - r * 1.3);
-    ctx.quadraticCurveTo(cx + r * 0.08, cy - r * 1.16, cx + r * 0.16, cy - r * 0.97);
-    outline();
-    ctx.fillStyle = shade(color, -0.1);
-    for (const s of [-1, 1]) {
-      ctx.beginPath();
-      ctx.ellipse(cx + s * r * 0.97, cy - r * 0.02, r * 0.16, r * 0.22, 0, 0, Math.PI * 2);
-      outline();
-    }
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    outline();
-    for (const s of [-1, 1]) eye(cx + s * r * 0.36, cy - r * 0.16, r * 0.22, r * 0.27, look);
-    mouth(cx, cy + r * 0.45, r * 0.28);
   }
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  outline();
+  for (const s of [-1, 1]) eye(cx + s * r * 0.36, cy - r * 0.16, r * 0.22, r * 0.27, look);
+  mouth(cx, cy + r * 0.45, r * 0.28);
 
   // What it's up to, as a badge.
   const badge = { waiting: '👋', sleeping: '💤', stressed: '💦', working: '⌨️' }[status];

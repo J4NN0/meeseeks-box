@@ -14,7 +14,6 @@ import { FolderPicker } from './folders.js';
 import { copyFrom, esc, shellQuote } from './util.js';
 
 const clock = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
-const NAMES = { meeseeks: 'Meeseeks', clawd: 'Clawd', butterbot: 'Butter Bot' };
 const REFETCH_MS = 5000;
 const MAX_PREVIEW = 1200;
 /** How long a message you sent waits to show up in the transcript before it's shown on its own. */
@@ -195,7 +194,6 @@ export class Talk {
     const key = JSON.stringify([this.agent.id, this.agent.session.status, this.chat.length, this.chat.at(-1)?.ts, this.chat.at(-1)?.text?.length, this.chat.at(-1)?.steps, pending.map((m) => m.state)]);
     if (key === this.convoKey) return;
     this.convoKey = key;
-    const name = NAMES[this.agent.kind] || 'Agent';
     const busy = this.agent.session.status === 'working';
     const sentLabel = busy ? 'Sent: it reads this once it’s done with what it’s on' : 'Sent';
     const entries = [...this.chat.map((e) => ({ ...e })), ...pending.map((m) => ({ ...m, who: 'you', mine: true }))].sort((a, b) => a.ts - b.ts);
@@ -203,7 +201,7 @@ export class Talk {
       if (e.who === 'did') return `<li class="did">${didLine(e)}</li>`;
       const via = e.via ? (e.via === 'meeseeks' ? ' · from the box' : ` · via ${esc(e.via)}`) : '';
       const state = e.mine ? `<em class="state ${e.state}">${esc(e.state === 'failed' ? `Not sent: ${e.error}` : e.state === 'sending' ? 'Sending…' : sentLabel)}</em>` : '';
-      const who = e.who === 'you' ? `You${via}` : esc(name);
+      const who = e.who === 'you' ? `You${via}` : 'Meeseeks';
       return `<li class="${e.who}${e.mine ? ' mine' : ''}"><div class="who"><b>${who}</b><time>${clock(e.ts)}</time></div><div class="text">${renderText(e.text)}</div>${state}</li>`;
     });
     const nearBottom = this.convo.scrollHeight - this.convo.scrollTop - this.convo.clientHeight < 60;

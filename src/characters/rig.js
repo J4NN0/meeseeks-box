@@ -77,7 +77,7 @@ const _aim = new THREE.Quaternion();
 const _inv = new THREE.Quaternion();
 
 /**
- * The rotation for a joint (a hand, a claw) whose parent chain turns by
+ * The rotation for a joint (a hand) whose parent chain turns by
  * `chain`, so that its -y points along `dir`: the way a pen held in it
  * points. A quaternion, for the Poser's turn().
  */
@@ -202,10 +202,13 @@ export class Poser {
 }
 
 // Slaps ----------------------------------------------------------------------
-// Right-click a mascot and a cartoon hand smacks it (world/hand.js). The
+// Right-click a Meeseeks and a cartoon hand smacks it (world/hand.js). The
 // reaction plays on joints the poses never touch (`jolt` above the hips,
-// `headJolt` under the neck), so it lands on top of whatever the mascot is
-// doing: walking, typing, napping, waving.
+// `headJolt` under the neck), so it lands on top of whatever it is doing:
+// walking, typing, napping, waving.
+
+/** How hard a slap throws the head, the body and the squash. */
+const SLAP_FEEL = { head: 0.5, body: 0.1, squash: 0.08 };
 
 const _hit = new THREE.Vector3();
 const _cup = new THREE.Vector3();
@@ -214,7 +217,7 @@ const _r = new THREE.Vector3();
 const _tilt = new THREE.Vector3();
 const _kick = new THREE.Vector3();
 
-/** Shared bookkeeping for every mascot: materials for highlight, blink timers. */
+/** A Meeseeks' bookkeeping (body in meeseeks.js): materials for highlight, blink timers, slaps. */
 export class CharacterBase {
   constructor(seed) {
     this.root = new THREE.Group();
@@ -229,26 +232,21 @@ export class CharacterBase {
     this.seed = seed;
     this.offset = Math.random() * 100;
 
-    // Each mascot sets these up for slaps: the joints that take the hit, the
+    // The body sets these up for slaps: the joints that take the hit, the
     // head the hand aims at (`face`, `faceRadius`), where the dizzy stars
-    // circle (`crown`, `crownRadius`), cheeks for the handprint (`marks`,
-    // -x then +x), and how hard each part gets thrown.
+    // circle (`crown`, `crownRadius`), and cheeks for the handprint
+    // (`marks`, -x then +x).
     this.jolt = null;
     this.headJolt = null;
     this.face = null;
-    this.faceRadius = 0.25;
+    this.faceRadius = 0;
     this.crown = null;
-    this.crownRadius = 0.2;
+    this.crownRadius = 0;
     this.marks = [];
-    this.slapFeel = { head: 0.5, body: 0.1, squash: 0.08, spin: false };
-    this.slapWords = ['SLAP!', 'SLAP!', 'SMACK!', 'WHAP!'];
-    this.slapSparks = 4;
     this.slapT = Infinity;
     this.headWobble = new Wobble(16, 0.3);
     this.bodyWobble = new Wobble(10, 0.35);
     this.squash = new Wobble(18, 0.35);
-    this.spin = 0;
-    this.spinTarget = 0;
 
     // At a meeting table (`setTable`): where its notepad and mug are, in its
     // own frame. It takes notes with `pen` and drinks with `cupHand`: `sip`
@@ -256,8 +254,6 @@ export class CharacterBase {
     // and `cupOffset` where the mug's middle is from that hand.
     this.table = null;
     this.pen = null;
-    // Where it wants its pad, if its arms don't reach the usual spot ({ x, z }, its own frame).
-    this.padSpot = null;
     this.sip = 0;
     // Seconds of notes it's written on the pad: where its pen is on the page.
     this.written = 0;
@@ -307,19 +303,16 @@ export class CharacterBase {
    */
   slap(push, toward) {
     this.slapT = 0;
-    const { head, body, squash, spin } = this.slapFeel;
+    const { head, body, squash } = SLAP_FEEL;
     // The hand lands above the neck and in front of it, so the head rolls
     // with the push and turns away from it (or towards it, hit from behind).
     const torque = _r.set(0, 1, 0).addScaledVector(toward, 0.8).cross(push).normalize();
-    if (this.headJolt) this.headWobble.kick(_kick.copy(torque).multiplyScalar(head));
-    // The body leans with the push and twists a little; with no head to
-    // turn (Clawd), it takes the whole twist.
+    this.headWobble.kick(_kick.copy(torque).multiplyScalar(head));
+    // The body leans with the push and twists a little.
     _tilt.set(push.z, 0, -push.x).normalize().multiplyScalar(body);
-    _tilt.y = torque.y * body * (this.headJolt ? 0.6 : 1.6);
+    _tilt.y = torque.y * body * 0.6;
     this.bodyWobble.kick(_tilt);
     this.squash.kick(_kick.set(0, squash, 0));
-    // A robot head just spins right round.
-    if (spin) this.spinTarget += Math.PI * 2 * (torque.y < 0 ? -1 : 1);
     // A handprint on the cheek on the side it landed, unless it hit the back
     // of the head.
     const hit = _hit.copy(push).negate();
@@ -335,28 +328,24 @@ export class CharacterBase {
     this.headWobble.step(dt);
     this.bodyWobble.step(dt);
     this.squash.step(dt);
-    this.spin = damp(this.spin, this.spinTarget, 5, dt);
-    if (Math.abs(this.spinTarget - this.spin) < 0.01) this.spin = this.spinTarget = 0;
 
     const h = this.headWobble.x;
-    this.headJolt?.rotation.set(h.x, h.y + this.spin, h.z);
+    this.headJolt.rotation.set(h.x, h.y, h.z);
     const b = this.bodyWobble.x;
     const s = this.squash.x.y;
-    if (this.jolt) {
-      this.jolt.rotation.set(b.x, b.y, b.z);
-      this.jolt.scale.set(1 + s / 2, 1 - s, 1 + s / 2);
-    }
+    this.jolt.rotation.set(b.x, b.y, b.z);
+    this.jolt.scale.set(1 + s / 2, 1 - s, 1 + s / 2);
 
     for (const m of this.marks) {
       if (m.visible) m.material.opacity = 0.85 * THREE.MathUtils.clamp((SLAP.mark - t) / 1.5, 0, 1);
     }
     this.updateStars(t, dt);
 
-    if (t > SLAP.mark && this.headWobble.resting && this.bodyWobble.resting && this.squash.resting && !this.spinTarget) {
+    if (t > SLAP.mark && this.headWobble.resting && this.bodyWobble.resting && this.squash.resting) {
       this.slapT = Infinity;
-      this.headJolt?.rotation.set(0, 0, 0);
-      this.jolt?.rotation.set(0, 0, 0);
-      this.jolt?.scale.set(1, 1, 1);
+      this.headJolt.rotation.set(0, 0, 0);
+      this.jolt.rotation.set(0, 0, 0);
+      this.jolt.scale.set(1, 1, 1);
       for (const m of this.marks) m.visible = false;
     }
   }

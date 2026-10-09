@@ -21,7 +21,6 @@ import { TodayFeed } from './data/today.js';
 import { Hud } from './ui/hud.js';
 import { esc } from './ui/util.js';
 import { Wipe } from './ui/wipe.js';
-import { MASCOT_MODES } from './characters/index.js';
 import { CONFIG } from './config.js';
 
 const store = {
@@ -78,13 +77,12 @@ const feed = new Feed();
 const today = new TodayFeed();
 dashboard.setProvider(store.get('limits', 'claude'));
 setChristmasLights(store.get('lights', 'on') === 'on');
-let mode = CONFIG.mascots || store.get('mascots', 'meeseeks');
-if (!MASCOT_MODES[mode]) mode = 'meeseeks';
+// Left over from when you could pick other mascots.
+try { localStorage.removeItem('meeseeks:mascots'); } catch { /* private mode */ }
 const bootAt = performance.now();
 
 const multiverse = new Multiverse({
   boards: { dashboard, whiteboard },
-  mode,
   onEvent(type, agent) {
     // Don't greet every pre-existing session with a toast on page load.
     if (type === 'spawn' && performance.now() - bootAt < 8000) return;
@@ -106,12 +104,6 @@ const walker = new Walker(camera, renderer.domElement, { colliders: here().world
 let view = 'orbit'; // orbit | walk
 
 const hud = new Hud({
-  mode,
-  onModeChange(m) {
-    mode = m;
-    store.set('mascots', m);
-    multiverse.setMode(m);
-  },
   onWalk: () => (view === 'walk' ? walker.lock() : enterWalk()),
   onMeeting: () => toggleMeeting(),
   onReset: () => (view === 'walk' ? exitWalk() : unfocus()),
@@ -180,7 +172,7 @@ function updateFlight(dt) {
   }
 }
 
-/** Right-click: a hand swings in and slaps the mascot (or helper) you're on. */
+/** Right-click: a hand swings in and slaps the Meeseeks (or helper) you're on. */
 function slap(target) {
   if (traveling || !target?.agent) return;
   target.agent.slap(camera, target.who);
@@ -656,7 +648,7 @@ let aimFrame = 0;
 let downAt = null;
 
 /**
- * What's under a screen point: { agent, who } for a mascot or its helpers
+ * What's under a screen point: { agent, who } for a Meeseeks or its helpers
  * (`who` being the one hit), { agent } for its desk; { board, action } for a
  * wall board (action is null between items).
  */

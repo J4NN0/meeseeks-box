@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mesh, toon } from '../engine/toon.js';
 
-// The hand that slaps the mascots: Rick's, the player's. Effects runs the
+// The hand that slaps the Meeseeks: Rick's, the player's. Effects runs the
 // slap (what it hits, the sparks, the "SLAP!"); this is the arm and its swing.
 
 // Measured in palm heights: palm towards +x, fingers along +y, thumb towards

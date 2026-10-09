@@ -1,4 +1,4 @@
-import { MASCOT_MODES, agentColor } from '../characters/index.js';
+import { agentColor } from '../characters/index.js';
 import { STATUS_COLORS, STATUS_LABELS, formatDuration, providerInfo, testSummary } from '../status.js';
 import { Talk } from './talk.js';
 import { copyFrom, esc, shellQuote } from './util.js';
@@ -6,16 +6,11 @@ import { copyFrom, esc, shellQuote } from './util.js';
 const $ = (id) => document.getElementById(id);
 const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100_000 ? 0 : 1)}k` : String(n || 0));
 
-const KIND_NAMES = { meeseeks: 'A Meeseeks', clawd: 'Clawd', butterbot: 'A Butter Bot' };
 /** The agent panel's tabs, the chat first. */
 const TABS = [['chat', '💬 Chat'], ['activity', '📜 Activity'], ['details', '🔎 Details']];
 
 export class Hud {
-  constructor({ mode, onModeChange, onWalk, onMeeting, onReset, onClosePanel, onGoToAgent, onVerse, box }) {
-    const select = $('mascot-mode');
-    for (const [value, label] of Object.entries(MASCOT_MODES)) select.add(new Option(label, value, false, value === mode));
-    select.addEventListener('change', () => onModeChange(select.value));
-
+  constructor({ onWalk, onMeeting, onReset, onClosePanel, onGoToAgent, onVerse, box }) {
     this.walkBtn = $('walk-toggle');
     this.walkBtn.addEventListener('click', () => onWalk());
     // Walking needs a mouse to capture; hide it on touch-only devices.
@@ -135,7 +130,7 @@ export class Hud {
 
   announce(type, agent) {
     const who = `<b>${esc(agent.session.project || agent.session.title)}</b>${agent.where ? ` in the ${esc(agent.where)}` : ''}`;
-    if (type === 'spawn') this.toast(`🟦 ${KIND_NAMES[agent.kind] || 'An agent'} appeared for ${who}`, agent.colorHex);
+    if (type === 'spawn') this.toast(`🟦 A Meeseeks appeared for ${who}`, agent.colorHex);
     // One out of the box that you skipped isn't done, just gone, as you asked.
     if (type === 'leave' && agent.session.box?.state !== 'new') this.toast(`✨ ${who} is done. *poof*`, agent.colorHex);
     if (type === 'waiting') this.toast(`🙋 ${who} is waiting on you`, agent.colorHex);
@@ -210,9 +205,9 @@ export class Hud {
     this.panel.style.setProperty('--agent', a.colorHex);
     this.panel.style.setProperty('--status', STATUS_COLORS[a.visualStatus] || '#999');
 
-    if (changed('head', `${s.id}:${a.visualStatus}:${s.title}:${a.kind}`)) {
+    if (changed('head', `${s.id}:${a.visualStatus}:${s.title}`)) {
       this.panelBody.querySelector('.agent-head').innerHTML = `
-        <span class="provider"><i></i>${esc(p.name)} · ${esc(KIND_NAMES[a.kind] || '')}</span>
+        <span class="provider"><i></i>${esc(p.name)} · A Meeseeks</span>
         <h2>${esc(s.title)}</h2>
         <span class="status">${esc(STATUS_LABELS[a.visualStatus] || a.visualStatus)}</span>`;
     }

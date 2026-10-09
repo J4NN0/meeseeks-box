@@ -12,6 +12,10 @@ puffGeometry.userData.shared = true;
 
 const _scale = new THREE.Vector3();
 
+// What a slap shouts as it lands, and how many sparks fly off it.
+const SLAP_WORDS = ['SLAP!', 'SLAP!', 'SMACK!', 'WHAP!'];
+const SLAP_SPARKS = 4;
+
 export class Effects {
   constructor(scene) {
     this.scene = scene;
@@ -29,10 +33,10 @@ export class Effects {
    * (`right`, flat). Calls `onHit(push)` as it lands, `push` being where it
    * shoves the head. `radius` is the head's, in the face's own scale.
    */
-  slap({ camera, face, radius, right, words = ['SLAP!'], sparks = 4, onHit }) {
+  slap({ camera, face, radius, right, onHit }) {
     const at = face.getWorldPosition(new THREE.Vector3());
     const hand = new SlapHand(this.scene, { camera, at, scale: face.getWorldScale(new THREE.Vector3()).x, radius, right });
-    this.slaps.push({ hand, face, words, sparks, onHit, t: 0, hit: false });
+    this.slaps.push({ hand, face, onHit, t: 0, hit: false });
   }
 
   updateSlaps(dt) {
@@ -41,7 +45,7 @@ export class Effects {
       const { hand } = s;
       s.t += dt;
       if (!s.hit) {
-        // Its mascot poofed (or was swapped) before the hand got there.
+        // Its Meeseeks poofed before the hand got there.
         if (!this.holds(s.face)) {
           this.dropSlap(i);
           continue;
@@ -56,8 +60,8 @@ export class Effects {
         s.onHit?.(hand.out.clone().negate());
         const r = hand.reach;
         const at = hand.at.clone().addScaledVector(hand.out, r * 1.05);
-        this.sparkBurst(at, { scale: hand.size * 2.2, count: s.sparks, size: hand.size * 2.4 });
-        this.burst(at.addScaledVector(UP, r * 1.1).addScaledVector(hand.right, r * 0.3), s.words[Math.floor(Math.random() * s.words.length)]);
+        this.sparkBurst(at, { scale: hand.size * 2.2, count: SLAP_SPARKS, size: hand.size * 2.4 });
+        this.burst(at.addScaledVector(UP, r * 1.1).addScaledVector(hand.right, r * 0.3), SLAP_WORDS[Math.floor(Math.random() * SLAP_WORDS.length)]);
       }
       if (s.t >= END) this.dropSlap(i);
     }

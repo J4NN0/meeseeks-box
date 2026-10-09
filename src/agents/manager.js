@@ -15,7 +15,6 @@ export class AgentManager {
   constructor(world, { onClick } = {}) {
     this.world = world;
     this.agents = new Map();
-    this.mode = 'meeseeks';
     this.onClick = onClick;
     this.queue = [];
     this.spawnCooldown = 0;
@@ -97,16 +96,11 @@ export class AgentManager {
   }
 
   spawn(session, now, opts) {
-    const agent = new Agent(session, this.world, { mode: this.mode, onClick: this.onClick, now, ...opts });
+    const agent = new Agent(session, this.world, { onClick: this.onClick, now, ...opts });
     this.agents.set(session.id, agent);
     // Built mid-meeting while you weren't looking: it's already in there.
     if (opts?.instant && this.meeting) this.join(agent, true);
     return agent;
-  }
-
-  setMode(mode) {
-    this.mode = mode;
-    for (const a of this.agents.values()) a.setMascot(mode);
   }
 
   tick(dt, t, now, camera) {

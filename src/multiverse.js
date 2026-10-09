@@ -3,7 +3,7 @@ import { World } from './world/index.js';
 import { verse } from './world/verses.js';
 import { AgentManager } from './agents/manager.js';
 import { Seating } from './agents/seating.js';
-import { agentColor, mascotKind } from './characters/index.js';
+import { agentColor } from './characters/index.js';
 import { disposeScene } from './engine/dispose.js';
 import { visualStatus } from './status.js';
 
@@ -33,11 +33,10 @@ class Universe {
     return !!this.scene;
   }
 
-  build({ boards, mode, onClick, onEnterGate }) {
+  build({ boards, onClick, onEnterGate }) {
     this.scene = new THREE.Scene();
     this.world = new World(this.scene, { level: this.level, boards, onEnterGate });
     this.manager = new AgentManager(this.world, { onClick });
-    this.manager.mode = mode;
   }
 
   dispose(keep) {
@@ -60,10 +59,9 @@ export class Multiverse {
    * is; `onEnterGate(level)` when a battery tag is clicked; `onCollapse()`
    * when the universe you're in is no longer needed.
    */
-  constructor({ boards, mode, onEvent, onClick, onEnterGate, onCollapse }) {
+  constructor({ boards, onEvent, onClick, onEnterGate, onCollapse }) {
     this.boards = boards;
     this.keep = new Set([boards.dashboard.texture, boards.whiteboard.texture]);
-    this.mode = mode;
     this.onEvent = onEvent;
     this.onClick = onClick;
     this.onEnterGate = onEnterGate;
@@ -71,7 +69,7 @@ export class Multiverse {
     this.seating = new Seating();
     /**
      * Every agent, wherever it works: what the HUD and the boards list.
-     * id -> { id, session, colorHex, level, where, kind, visualStatus }
+     * id -> { id, session, colorHex, level, where, visualStatus }
      */
     this.records = new Map();
     this.universes = [new Universe(0)];
@@ -82,7 +80,7 @@ export class Multiverse {
   }
 
   build(universe) {
-    universe.build({ boards: this.boards, mode: this.mode, onClick: this.onClick, onEnterGate: this.onEnterGate });
+    universe.build({ boards: this.boards, onClick: this.onClick, onEnterGate: this.onEnterGate });
     universe.manager.meeting = this.meeting;
   }
 
@@ -143,7 +141,6 @@ export class Multiverse {
         record.session = s;
         record.level = level;
         record.where = level ? verse(level).name : '';
-        record.kind = mascotKind(this.mode, s);
         record.visualStatus = visualStatus(s, now);
         if (arrivals.has(s.id)) this.onEvent?.('spawn', record);
         else if (was !== 'waiting' && s.status === 'waiting') this.onEvent?.('waiting', record);
@@ -211,12 +208,6 @@ export class Multiverse {
       const inside = u.level + 1 < this.needed ? this.universes[u.level + 1].sessions : [];
       u.world.battery.set({ open: u.level + 1 < this.needed, count: inside.length, waiting: inside.filter((s) => s.status === 'waiting').length });
     }
-  }
-
-  setMode(mode) {
-    this.mode = mode;
-    for (const u of this.universes) if (u.built) u.manager.setMode(mode);
-    for (const r of this.records.values()) r.kind = mascotKind(mode, r.session);
   }
 
   find(id) {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { createMascot, mascotKind, agentColor } from '../characters/index.js';
+import { createMeeseeks, agentColor } from '../characters/index.js';
 import { dampAngle, elasticOut } from '../engine/motion.js';
 import { STATUS_COLORS, STATUS_LABELS, STATUS_SITUATIONS, formatDuration, providerInfo, statusSince, visualStatus } from '../status.js';
 import { line } from './lines.js';
@@ -33,7 +33,7 @@ const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 
  * desk, now and then it gets up for a coffee (`takeBreak`) and comes back.
  */
 export class Agent {
-  constructor(session, world, { mode, onClick, now, instant = false, entry = 'box' }) {
+  constructor(session, world, { onClick, now, instant = false, entry = 'box' }) {
     this.id = session.id;
     this.session = session;
     this.world = world;
@@ -69,8 +69,7 @@ export class Agent {
     this.color = agentColor(session.provider, session.id);
     this.colorHex = `#${this.color.getHexString()}`;
 
-    this.kind = mascotKind(mode, session);
-    this.character = this.makeCharacter(this.kind);
+    this.character = this.makeCharacter();
     world.scene.add(this.character.root);
 
     this.desk = world.claimDesk(this);
@@ -92,14 +91,14 @@ export class Agent {
       this.path = world.pathFromBattery(this.target);
       world.battery.zap();
       world.effects.poof(this.emergeFrom, { scale: 0.5, count: 10 });
-      this.say(line(this.kind, 'up'), 2.4);
+      this.say(line('up'), 2.4);
     } else {
       // Jitter the spawn spot so back-to-back arrivals don't overlap.
       this.spawnPoint = world.spawnPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.3));
       this.path = world.pathTo(this.target);
       world.box.press();
       world.effects.poof(this.spawnPoint.clone().add(new THREE.Vector3(0, 0.1, 0)), { scale: 1.1 });
-      this.say(line(this.kind, 'spawn'), 2.6);
+      this.say(line('spawn'), 2.6);
     }
     this.character.root.position.copy(this.spawnPoint);
     this.character.root.scale.setScalar(0.01);
@@ -168,7 +167,7 @@ export class Agent {
       this.takePlace();
       return;
     }
-    this.say(line(this.kind, 'meeting'), 2.4);
+    this.say(line('meeting'), 2.4);
     const from = atDesk ? this.desk.approachWorld() : this.character.root.position.clone();
     const path = [...(atDesk ? [from] : []), ...this.world.route(from, place.at)];
     // Sitting at its desk, it gets up first ('turning' is still standing behind the chair).
@@ -258,7 +257,7 @@ export class Agent {
     this.target = this.desk ? this.desk.approachWorld() : this.lounge.position.clone();
     this.returning = true;
     if (seated && !instant) {
-      this.say(line(this.kind, 'release'), 2.2);
+      this.say(line('release'), 2.2);
       this.rise([chair.approach.clone(), ...this.world.route(chair.approach, this.target)], 'walking', this.desk);
       return;
     }
@@ -273,7 +272,7 @@ export class Agent {
     this.path = this.world.route(this.character.root.position.clone(), this.target);
     this.speed = MEETING_SPEED;
     this.setPhase('walking');
-    this.say(line(this.kind, 'release'), 2.2);
+    this.say(line('release'), 2.2);
   }
 
   /** Up out of whatever chair it's in, standing where it was. */
@@ -291,15 +290,13 @@ export class Agent {
   }
 
   /**
-   * Sat down at the meeting table: notepad and pen out (the pad pulled in
-   * closer, for a mascot with short arms), coffee soon.
+   * Sat down at the meeting table: notepad and pen out, coffee soon.
    */
   sitAtTable() {
     const { chair, character: c } = this;
     const { pad, cup } = chair.setting;
-    const at = c.padSpot ? new THREE.Vector3(c.padSpot.x, pad.y, c.padSpot.z) : pad;
-    chair.slidePad(at);
-    c.setTable({ pad: at, padTurn: chair.padTurn, cup });
+    chair.slidePad(pad);
+    c.setTable({ pad, padTurn: chair.padTurn, cup });
     this.sipT = -1;
     this.nextSip = 2 + Math.random() * 7;
   }
@@ -349,15 +346,15 @@ export class Agent {
 
   // ---------------------------------------------------------- coffee breaks
 
-  /** Asleep at its desk, and a Meeseeks: the others don't reach the counter. */
+  /** Asleep at its desk. */
   get canTakeBreak() {
-    return this.phase === 'seated' && this.visualStatus === 'sleeping' && this.kind === 'meeseeks' && !this.place && !this.coffeeBreak;
+    return this.phase === 'seated' && this.visualStatus === 'sleeping' && !this.place && !this.coffeeBreak;
   }
 
   /** Up out of its chair and off to the coffee bar, for `coffeeBreak` (coffee-break.js). */
   takeBreak(coffeeBreak) {
     this.coffeeBreak = coffeeBreak;
-    this.say(line(this.kind, 'break'), 2.4);
+    this.say(line('break'), 2.4);
     this.rise(coffeeBreak.start(this.desk.approachWorld()), 'coffee', this.desk);
   }
 
@@ -386,7 +383,7 @@ export class Agent {
     this.speed = WALK_SPEED;
     this.backFromBar = true;
     this.setPhase('walking');
-    this.say(line(this.kind, called ? 'backToWork' : 'breakOver'), 2.2);
+    this.say(line(called ? 'backToWork' : 'breakOver'), 2.2);
   }
 
   /** Everything it had at the coffee bar back where it came from, and its spot there free. */
@@ -395,8 +392,8 @@ export class Agent {
     this.coffeeBreak = null;
   }
 
-  makeCharacter(kind) {
-    const c = createMascot(kind, { provider: this.session.provider, seed: this.session.id });
+  makeCharacter() {
+    const c = createMeeseeks({ provider: this.session.provider, seed: this.session.id });
     c.tag(this.id);
     return c;
   }
@@ -512,7 +509,7 @@ export class Agent {
     // Poofs right here, saying why: the session ended (or, out of the box,
     // never had a task), it's needed upstairs, or it was bumped down before
     // it even reached a desk.
-    this.say(line(this.kind, reason !== 'ended' ? reason : this.awaiting ? 'skip' : 'done'), 1.6);
+    this.say(line(reason !== 'ended' ? reason : this.awaiting ? 'skip' : 'done'), 1.6);
   }
 
   depart() {
@@ -548,34 +545,7 @@ export class Agent {
     this.speed = WALK_SPEED;
     this.sink = 0;
     this.setPhase('departing');
-    this.say(line(this.kind, 'down'), 2.4);
-  }
-
-  setMascot(mode) {
-    const kind = mascotKind(mode, this.session);
-    if (kind === this.kind || this.phase === 'leaving' || this.phase === 'gone') return;
-    // Only a Meeseeks reaches the coffee bar's counter.
-    this.endBreak();
-    const old = this.character;
-    const next = this.makeCharacter(kind);
-    old.root.parent.add(next.root);
-    next.root.position.copy(old.root.position);
-    next.root.rotation.copy(old.root.rotation);
-    next.root.scale.copy(old.root.scale);
-    next.setMode(old.mode);
-    next.setMood(old.mood);
-    this.label.removeFromParent();
-    next.root.add(this.label);
-    const pos = old.root.getWorldPosition(new THREE.Vector3());
-    // A mug it was drinking from goes back down: the new one sits down afresh.
-    if (old.table) this.putDownCup();
-    old.dispose();
-    this.character = next;
-    this.kind = kind;
-    if (old.table) this.sitAtTable();
-    this.world.effects.poof(pos, { scale: 0.8, count: 10 });
-    for (const h of this.helpers) this.world.effects.poof(h.root.getWorldPosition(new THREE.Vector3()), { scale: 0.5, count: 6 });
-    this.syncHelpers(0, true);
+    this.say(line('down'), 2.4);
   }
 
   // ------------------------------------------------------------ per frame
@@ -618,7 +588,7 @@ export class Agent {
         c.setMood(this.phaseTime > 1.25 ? 'wait' : 'cheer');
         root.rotation.y = damp(root.rotation.y, 0, 6, dt);
         if (this.phaseTime > 1.25 && !this.awaiting) {
-          if (this.session.box) this.say(line(this.kind, 'task'), 2.2);
+          if (this.session.box) this.say(line('task'), 2.2);
           this.setPhase('walking');
         }
         break;
@@ -772,7 +742,7 @@ export class Agent {
       if (this.nextChatter <= 0) {
         this.nextChatter = 18 + Math.random() * 30;
         const situation = STATUS_SITUATIONS[status];
-        if (situation) this.say(line(this.kind, this.moodFor(status) === 'think' ? 'think' : situation));
+        if (situation) this.say(line(this.moodFor(status) === 'think' ? 'think' : situation));
       }
       this.syncHelpers(dt);
     }
@@ -797,12 +767,12 @@ export class Agent {
 
   onStatusChange(prev, status) {
     const situation = STATUS_SITUATIONS[status];
-    if (situation && prev !== null) this.say(line(this.kind, situation));
+    if (situation && prev !== null) this.say(line(situation));
     this.nextChatter = 15 + Math.random() * 20;
   }
 
   /**
-   * Subagents appear as mini versions of the mascot standing by the desk,
+   * Subagents appear as mini Meeseeks standing by the desk,
    * and carry on there while it's in a meeting.
    */
   syncHelpers(dt, rebuild = false) {
@@ -814,7 +784,7 @@ export class Agent {
     }
     while (this.helpers.length < want) {
       const i = this.helpers.length;
-      const character = createMascot(this.kind, { provider: this.session.provider, seed: `${this.session.id}:helper:${i}` });
+      const character = createMeeseeks({ provider: this.session.provider, seed: `${this.session.id}:helper:${i}` });
       character.tag(this.id);
       character.root.scale.setScalar(0.72);
       character.root.position.copy(HELPER_SPOTS[i]);
@@ -822,7 +792,7 @@ export class Agent {
       this.desk.root.add(character.root);
       this.helpers.push({ character, root: character.root, mood: i % 2 ? 'cheer' : 'idle' });
       if (!rebuild) this.world.effects.poof(character.root.getWorldPosition(new THREE.Vector3()), { scale: 0.6, count: 8 });
-      if (i === 0 && !rebuild) this.say(line(this.kind, 'helper'), 2.2);
+      if (i === 0 && !rebuild) this.say(line('helper'), 2.2);
     }
     while (this.helpers.length > want) {
       const h = this.helpers.pop();
@@ -858,7 +828,7 @@ export class Agent {
 
   // ---------------------------------------------------------------- slaps
 
-  /** The mascot (this agent's, or one of its helpers') that `object` is part of. */
+  /** The Meeseeks (this agent's, or one of its helpers') that `object` is part of. */
   characterOf(object) {
     for (let o = object; o; o = o.parent) {
       if (o === this.character.root) return this.character;
@@ -873,7 +843,7 @@ export class Agent {
    * and slaps `who`. Just for fun: the session, the status and the desk don't change.
    */
   slap(camera, who = this.character) {
-    if (this.phase === 'gone' || !who.face) return;
+    if (this.phase === 'gone') return;
     const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).setY(0);
     if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
     right.normalize();
@@ -882,20 +852,18 @@ export class Agent {
       face: who.face,
       radius: who.faceRadius,
       right,
-      words: who.slapWords,
-      sparks: who.slapSparks,
       onHit: (push) => this.slapped(who, push, camera.position),
     });
   }
 
   slapped(who, push, eye) {
-    // Gone (or swapped for another mascot) while the hand was on its way.
+    // Gone (or the helper poofed) while the hand was on its way.
     if (this.phase === 'gone' || !who.root.parent) return;
     const face = who.face.getWorldPosition(new THREE.Vector3());
     const toward = eye.clone().sub(face).setY(0);
     if (toward.lengthSq() < 1e-6) toward.copy(push).negate();
     toward.normalize();
-    // Into the mascot's own frame, where its joints turn.
+    // Into the Meeseeks' own frame, where its joints turn.
     const q = who.root.getWorldQuaternion(new THREE.Quaternion()).invert();
     who.slap(push.applyQuaternion(q), toward.applyQuaternion(q));
 
@@ -908,7 +876,7 @@ export class Agent {
       : status === 'sleeping' ? 'slapSleep'
       : status === 'waiting' ? 'slapWait'
       : 'slap';
-    this.say(line(this.kind, situation), 2.2);
+    this.say(line(situation), 2.2);
     this.nextChatter = Math.max(this.nextChatter, 12);
   }
 
@@ -997,7 +965,7 @@ function sipLift(t) {
 const _turn = new THREE.Euler();
 
 /**
- * Moves the mascot under `parent`, keeping where it is in the room, as a
+ * Moves the Meeseeks under `parent`, keeping where it is in the room, as a
  * plain turn about y. attach() alone can come out with a half turn as a flip
  * about x and z instead, and walking and sitting, which only turn y, would
  * then face it the wrong way round.

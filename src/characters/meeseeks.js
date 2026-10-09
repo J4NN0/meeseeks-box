@@ -68,7 +68,6 @@ function palmRoll({ shoulder, s }) {
 export class Meeseeks extends CharacterBase {
   constructor({ color = '#6ec6ee', seed = 'meeseeks', accessory } = {}) {
     super(seed);
-    this.kind = 'meeseeks';
     const r = rng(seed);
     const skinColor = new THREE.Color(color);
     const skin = this.track(ownToon(skinColor));

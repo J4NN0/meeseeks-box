@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-// What a mascot needs to take a slap: the springs its joints wobble on, the
+// What a Meeseeks needs to take a slap: the springs its joints wobble on, the
 // dizzy stars and the handprint. The reaction itself is in CharacterBase
 // (rig.js); the hand that does the slapping is in world/hand.js.
 
@@ -67,9 +67,9 @@ export const starGeometry = (() => {
 })();
 
 /**
- * A red handprint for the cheek, fingers up. Drawn the first time a mascot
- * asks for one, then shared by every mascot with cheeks to print it on; each
- * one fades its own copy of the material.
+ * A red handprint for the cheek, fingers up. Drawn the first time a Meeseeks
+ * asks for one, then shared by all of them; each one fades its own copy of
+ * the material.
  */
 let handprint;
 function handprintTexture() {

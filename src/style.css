@@ -80,7 +80,7 @@ html, body {
   align-items: center;
   gap: 8px;
 }
-.controls button, .select {
+.controls button {
   font: 800 14px Nunito, system-ui;
   color: var(--ink);
   background: var(--paper);
@@ -91,11 +91,9 @@ html, body {
   cursor: pointer;
   transition: transform 0.08s, box-shadow 0.08s;
 }
-.controls button:hover, .select:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+.controls button:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
 .controls button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
 .controls button[aria-pressed='true'] { background: var(--portal); }
-.select { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px 4px 12px; }
-.select select { font: 800 14px Nunito, system-ui; border: none; background: transparent; color: var(--ink); cursor: pointer; }
 
 .counts { display: flex; gap: 6px; }
 .count {

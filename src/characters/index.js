@@ -1,14 +1,6 @@
 import * as THREE from 'three';
-import { hash, rng } from '../engine/toon.js';
+import { rng } from '../engine/toon.js';
 import { Meeseeks } from './meeseeks.js';
-import { Clawd } from './clawd.js';
-import { ButterBot } from './butterbot.js';
-
-export const MASCOT_MODES = {
-  meeseeks: 'All Meeseeks',
-  mascots: 'Clawd + Butter Bot',
-  chaos: 'Interdimensional chaos',
-};
 
 // Provider sets the colour family, the session id nudges it so two agents
 // from the same provider are still told apart.
@@ -28,17 +20,7 @@ export function agentColor(provider, seed) {
   );
 }
 
-export function mascotKind(mode, session) {
-  // Whatever the mode, out of the Meeseeks Box comes a Meeseeks.
-  if (session.box) return 'meeseeks';
-  if (mode === 'mascots') return session.provider === 'codex' ? 'butterbot' : 'clawd';
-  if (mode === 'chaos') return ['meeseeks', 'clawd', 'butterbot'][hash(session.id) % 3];
-  return 'meeseeks';
-}
-
-export function createMascot(kind, { provider, seed }) {
-  const color = agentColor(provider, seed);
-  if (kind === 'clawd') return new Clawd({ color, seed });
-  if (kind === 'butterbot') return new ButterBot({ color, seed });
-  return new Meeseeks({ color, seed });
+/** A Meeseeks for a session (or one of its helpers, by `seed`), in its colours. */
+export function createMeeseeks({ provider, seed }) {
+  return new Meeseeks({ color: agentColor(provider, seed), seed });
 }
