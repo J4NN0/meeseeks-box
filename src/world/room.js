@@ -3,6 +3,7 @@ import { PALETTE, box, cyl, glow, mesh, noInk, ownToon, rng, sphere, toon } from
 import { createPortal } from './portal.js';
 import { createChristmasLights } from './christmas-lights.js';
 import { createCoffeeBar } from './coffee-bar.js';
+import { createArcade } from './arcade.js';
 import { CAR, HULL, HULL_Y, carColliders, hullGeometry } from './car.js';
 import { canvasTexture, glowTexture, labelTexture, neonSignTexture } from './screens.js';
 import { addCollection } from './props/index.js';
@@ -103,7 +104,7 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   solidCircle(-3.55, -5.45, 0.32);
   solidCircle(7.35, 5.2, 0.32);
   solidCircle(-7.35, -5.5, 0.32);
-  // Just clear of the neon sign; the switch sits between the shelves and the fridge.
+  // Just clear of the neon sign; the switch sits between the arcade and the fridge.
   const lights = createChristmasLights({
     runs: [
       { from: new THREE.Vector3(-7.9, 3.52, -5.95), to: new THREE.Vector3(2.4, 3.52, -5.95), inward: new THREE.Vector3(0, 0, 1) },
@@ -115,7 +116,7 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   room.add(lights.group);
   updaters.push(lights.update);
 
-  // Left wall: workbench, portal, Andúril, shelves, fridge ----------------
+  // Left wall: workbench, portal, Andúril, arcade, fridge -----------------
   const bench = workbench(-7.45, -3.9);
   room.add(bench);
   solidBox(-7.45, -3.9, 1.05, 2.85);
@@ -128,9 +129,14 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   updaters.push((dt, t) => portal.update(t));
 
   room.add(poster(1.45, 2.35, -5.96, 'WUBBA LUBBA', 'DUB DUB SHIP IT', '#97ce4c', 0));
-  room.add(shelves(-7.72, 3.3));
+  // Its back to the wall, facing the beanbags.
+  const arcade = createArcade();
+  arcade.group.position.set(-7.56, 0, 3.3);
+  arcade.group.rotation.y = Math.PI / 2;
+  room.add(arcade.group);
+  updaters.push(arcade.update);
   room.add(fridge(-7.45, 5.25));
-  solidBox(-7.72, 3.3, 0.52, 2.1);
+  solidBox(-7.54, 3.3, 0.88, 0.72);
   solidBox(-7.45, 5.25, 0.8, 0.8);
 
   // Chill zone ------------------------------------------------------------
@@ -183,6 +189,7 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
     wbFace,
     living,
     coffeeBar,
+    arcade,
     setEnclosed(on) {
       enclosure.visible = on;
     },
@@ -398,40 +405,6 @@ function poster(x, y, z, top, bottom, color, rotY = Math.PI / 2) {
   const face = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.2), new THREE.MeshBasicMaterial({ map: tex }));
   face.position.z = 0.018;
   g.add(face);
-  return g;
-}
-
-function shelves(x, z) {
-  const g = new THREE.Group();
-  g.position.set(x, 0, z);
-  const r = rng(42);
-  for (const s of [-1, 1]) g.add(box(0.5, 2.3, 0.05, PALETTE.woodDark, 0, 1.15, s * 1.0));
-  for (let level = 0; level < 4; level++) {
-    const y = 0.3 + level * 0.62;
-    g.add(box(0.5, 0.04, 2.0, PALETTE.wood, 0, y, 0));
-    let zz = -0.85;
-    while (zz < 0.8) {
-      const kind = r();
-      if (kind < 0.45) {
-        const w = 0.05 + r() * 0.05;
-        const h = 0.25 + r() * 0.15;
-        const book = box(0.3, h, w, ['#c0392b', '#2980b9', '#f39c12', '#8e44ad', '#16a085', '#ecf0f1'][Math.floor(r() * 6)], 0, y + 0.02 + h / 2, zz + w / 2);
-        g.add(book);
-        zz += w + 0.01;
-      } else if (kind < 0.7) {
-        g.add(cyl(0.07, 0.07, 0.22, '#e8f4f0', 12).translateY(y + 0.13).translateZ(zz + 0.08));
-        g.add(cyl(0.06, 0.06, 0.14, glow(['#97ce4c', '#6ec6ee', '#ff5fa2'][Math.floor(r() * 3)]), 12).translateY(y + 0.1).translateZ(zz + 0.08));
-        zz += 0.2;
-      } else if (kind < 0.85) {
-        g.add(box(0.36, 0.2, 0.3, '#c9a36b', 0, y + 0.12, zz + 0.16));
-        zz += 0.36;
-      } else {
-        // A McDonald's Szechuan sauce packet, framed like a relic.
-        g.add(box(0.04, 0.2, 0.16, '#f2c94c', -0.1, y + 0.12, zz + 0.1).rotateZ(-0.15));
-        zz += 0.24;
-      }
-    }
-  }
   return g;
 }
 
