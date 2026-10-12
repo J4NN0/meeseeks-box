@@ -48,6 +48,8 @@ Object.assign(labels.domElement.style, { position: 'absolute', inset: '0', point
 app.appendChild(labels.domElement);
 
 const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 200);
+/** Inside a battery, far enough to see the batteries it's nested in (world/backdrop.js). */
+const BACKDROP_FAR = 3000;
 enableInkLayers(camera);
 // The garage and the living room next door, from the front right.
 const HOME = { eye: new THREE.Vector3(14.8, 16.2, 26.7), look: new THREE.Vector3(3.3, 0.2, -0.4) };
@@ -98,7 +100,8 @@ const multiverse = new Multiverse({
     hud.announce(type, agent);
   },
   // A name tag: click to inspect, right-click to slap.
-  onClick: (agent, { slap: smack } = {}) => (smack ? slap({ agent }) : focusAgent(agent)),
+  // One walking through into the battery: its tag takes you to where it'll work.
+  onClick: (agent, { slap: smack } = {}) => (smack ? slap({ agent }) : agent.passing ? goToAgent(agent.id) : focusAgent(agent)),
   onEnterGate: (level) => enterGate(level),
   onCollapse: () => collapse(),
 });
@@ -278,6 +281,8 @@ function act(action) {
     // Diving in presses it on the way; an empty one still clicks.
     if (!multiverse.isOpen(action.level)) here().world.battery.press();
     enterGate(action.level);
+  } else if (action.kind === 'portal') {
+    climbOut({ via: 'portal' });
   } else if (action.kind === 'hint') {
     if (multiverse.isOpen(action.level)) hud.toast(`🔋 Press the remote in the engine bay (or its tag) to go into the ${verse(action.level).name}.`);
     else hud.toast(emptyVerse(action.level));
@@ -481,12 +486,24 @@ walker.addEventListener('lock', () => {
   syncWalkHud();
 });
 walker.addEventListener('unlock', syncWalkHud);
-walker.addEventListener('portal', () => {
-  // Wubba lubba dub dub: step through Rick's portal, come out by the car.
+/** The green blink of going through Rick's portal. */
+function portalFlash() {
   const flash = document.getElementById('portal-flash');
   flash.classList.remove('go');
   void flash.offsetWidth;
   flash.classList.add('go');
+}
+/** How long the blink takes to cover the screen (see .portal-flash in style.css). */
+const PORTAL_FLASH_PEAK_S = 0.135;
+
+walker.addEventListener('portal', () => {
+  // Inside the battery, the portal is the way out, up a level.
+  if (here().level > 0) {
+    climbOut({ via: 'portal' });
+    return;
+  }
+  // Wubba lubba dub dub: step through Rick's portal, come out by the car.
+  portalFlash();
   walker.teleport(7.2, -1.2, new THREE.Vector3(-2, 1.3, 0.5));
   hud.toast('🌀 Wubba lubba dub dub!');
 });
@@ -510,6 +527,21 @@ function fly(eye, look, duration) {
 function batteryView(world) {
   const { eye, look } = world.battery.view;
   return { eye: eye.clone(), look: look.clone() };
+}
+
+/** Diving in, in seconds: the ray locks on, you shrink into the box, and drop in down the far side. */
+const SHRINK_IN = { aim: 0.3, dive: 0.95, drop: 1.15 };
+const wait = (s) => new Promise((resolve) => setTimeout(resolve, s * 1000));
+
+/** Dropping into a universe: high above the Meeseeks Box, then down by it. */
+function landing(world) {
+  // Just in front of the box, not on top of it.
+  const spot = world.spawnPoint.clone().add(new THREE.Vector3(0, 0, 1.1));
+  return {
+    spot,
+    sky: { eye: spot.clone().add(new THREE.Vector3(0.8, 18, 3)), look: spot.clone() },
+    ground: { eye: spot.clone().add(new THREE.Vector3(2.6, 2.4, 5.2)), look: spot.clone().add(new THREE.Vector3(0, 0.8, 0)) },
+  };
 }
 
 /** Where the microverse box is on screen, in CSS pixels. */
@@ -550,7 +582,22 @@ function toggleHood() {
   }
 }
 
-async function travelTo(level, { then } = {}) {
+/** Up a level, from inside the battery (or as far up as there's anyone, if it emptied out). */
+function climbOut({ via } = {}) {
+  if (here().level > 0) travelTo(Math.min(here().level, multiverse.needed) - 1, { via });
+}
+
+/** In front of Rick's portal on the left wall, looking at it. */
+function portalView() {
+  const look = new THREE.Vector3(PORTAL.x, PORTAL.y, PORTAL.z);
+  return { eye: look.clone().add(new THREE.Vector3(4.2, 0.9, 1.4)), look };
+}
+
+/**
+ * `via: 'portal'` climbs out through Rick's portal on the wall instead of
+ * out of the battery, and comes out of the one upstairs.
+ */
+async function travelTo(level, { then, via } = {}) {
   if (traveling) {
     if (then) hud.toast('🔋 Hang on, still on the way. Try again in a moment.');
     return;
@@ -558,7 +605,7 @@ async function travelTo(level, { then } = {}) {
   if (level === here().level || !multiverse.isOpen(level)) return;
   traveling = true;
   try {
-    await travel(level);
+    await travel(level, via);
   } catch (err) {
     console.error('travel failed', err);
     return;
@@ -569,11 +616,12 @@ async function travelTo(level, { then } = {}) {
   then?.();
 }
 
-async function travel(level) {
+async function travel(level, via) {
   const from = here();
   const down = level > from.level;
+  const portal = !down && via === 'portal';
+  const portalPoint = new THREE.Vector3(PORTAL.x, PORTAL.y, PORTAL.z);
   const walking = view === 'walk';
-  const center = { x: innerWidth / 2, y: innerHeight / 2 };
   focused = null;
   leaveBoard();
   hud.hidePanel();
@@ -587,18 +635,45 @@ async function travel(level) {
     await fly(eye, look, 0.9);
   }
   if (down) {
+    // As a Meeseeks goes in: the remote clicks, and you shrink right down
+    // into the box, its glass filling the screen.
+    const { core } = from.world.battery;
     from.world.battery.press();
-    await new Promise((resolve) => setTimeout(resolve, 280));
+    await wait(SHRINK_IN.aim);
+    // Right up to the box: closer than the orbit lets you get, just this once.
+    const minDistance = controls.minDistance;
+    controls.minDistance = 0;
+    try {
+      if (!walking) await fly(core.clone().add(camera.position.clone().sub(core).setLength(0.06)), core.clone(), SHRINK_IN.dive);
+      else await wait(SHRINK_IN.dive * 0.6);
+      await wipe.cover({ flash: '#e53fd9' });
+    } finally {
+      controls.minDistance = minDistance;
+    }
+  } else {
+    // Through the portal, it's the portal's green and nothing else, as in the garage.
+    if (portal && !walking) {
+      const { eye, look } = portalView();
+      await fly(eye, look, 0.8);
+    }
+    // Through the portal: the same green blink as in the garage, swapping
+    // universes as it peaks.
+    if (portal) {
+      portalFlash();
+      await wait(PORTAL_FLASH_PEAK_S);
+    } else await wipe.cover({ name: verse(level).name, sub: 'climbing out of the battery…', from: null });
   }
-  const name = verse(level).name;
-  await wipe.cover({ name, sub: down ? 'shrinking into the battery…' : 'climbing out of the battery…', from: down ? (walking ? center : batteryOnScreen(from.world)) : null });
 
   // Swap universes while the screen is covered.
   if (walking) from.world.room.setEnclosed(false);
   multiverse.enter(level, Date.now());
   const to = here();
   ink.scene = to.scene;
+  camera.far = level ? BACKDROP_FAR : 200;
+  camera.updateProjectionMatrix();
   document.body.dataset.verse = level ? String(((level - 1) % 3) + 1) : '';
+  // The page behind the scene, in the same colour as the fog (verses.js).
+  document.body.style.setProperty('--space', level ? verse(level).space : null);
   hud.setVerses(multiverse.summary(), level);
   cancelFlight();
   if (walking) {
@@ -607,10 +682,11 @@ async function travel(level) {
     if (!walker.active) walker.start(camera.position);
     const { at, look } = to.world.battery.stand;
     if (down) walker.teleport(WALK_START.eye.x, WALK_START.eye.z, WALK_START.look);
+    else if (portal) walker.teleport(PORTAL.x + 1.6, PORTAL.z, portalPoint.clone().setY(1.4).add(new THREE.Vector3(4, 0, 0)));
     else walker.teleport(at.x, at.z, look);
   } else {
-    // Down: drop in from high above. Up: start at the battery, pull back.
-    const start = down ? { eye: HOME.look.clone().add(new THREE.Vector3(2, 32, 6)), look: HOME.look.clone() } : batteryView(to.world);
+    // Down: drop in from high above, down a ray. Up: start at the battery, pull back.
+    const start = down ? landing(to.world).sky : portal ? portalView() : batteryView(to.world);
     camera.position.copy(start.eye);
     controls.target.copy(start.look);
     controls.update();
@@ -620,11 +696,18 @@ async function travel(level) {
 
   // Down: fade out while dropping in. Up: shrink into the box, then pull back.
   if (down) {
-    const reveal = wipe.reveal({ to: null });
-    if (!walking) flyTo(HOME.eye.clone(), HOME.look.clone(), { duration: 1.6 });
-    await reveal;
+    // Drop in from high above, landing by the Meeseeks Box, then pull back
+    // to the overview.
+    const reveal = wipe.reveal({ to: null, duration: 450 });
+    if (walking) {
+      await reveal;
+    } else {
+      const { ground } = landing(to.world);
+      await fly(ground.eye, ground.look, SHRINK_IN.drop);
+      flyTo(HOME.eye.clone(), HOME.look.clone(), { duration: 1.5 });
+    }
   } else {
-    await wipe.reveal({ to: walking ? center : batteryOnScreen(to.world) });
+    if (!portal) await wipe.reveal({ to: walking ? null : batteryOnScreen(to.world) });
     if (!walking) flyTo(HOME.eye.clone(), HOME.look.clone(), { duration: 1.3 });
   }
 }
@@ -690,6 +773,7 @@ function pick(ndc, maxDistance = Infinity) {
       return { action: { id: 'gate-hint', kind: 'hint', level, label: `${name} · ${open ? `${n} agent${n === 1 ? '' : 's'}` : 'empty'}` } };
     }
     if (d.car) return { action: { id: 'car', kind: 'hood', label: 'Car' } };
+    if (d.portal) return { action: { id: 'portal', kind: 'portal', label: `Portal · ${verse(world.level - 1).name}` } };
     if (d.remote) return { action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
     if (d.livingTv) return { action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
     if (d.meetingBell) return { action: { id: 'bell', kind: 'meeting', label: multiverse.meeting ? 'Meeting bell\nring to send everyone back to work' : 'Meeting bell\nring to call everyone to the meeting room' } };
@@ -782,7 +866,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     // With nothing open, Esc climbs back out of the battery.
-    if (view === 'orbit' && !hud.panelOpen && !focusedBoard && here().level > 0) travelTo(Math.min(here().level, multiverse.needed) - 1);
+    if (view === 'orbit' && !hud.panelOpen && !focusedBoard && here().level > 0) climbOut();
     else if (view === 'orbit') closePanel();
     else if (hud.panelOpen) { focused = null; hud.hidePanel(); syncWalkHud(); }
   }

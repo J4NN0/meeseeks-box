@@ -562,9 +562,8 @@ body.walking.locked .hud-top .controls { opacity: 0.35; }
 /* --------------------------------------------- universes in the battery */
 
 /* The space outside tells you where you are: deeper means stranger. */
-body[data-verse='1'] { background: radial-gradient(ellipse at 30% 20%, #1d4d2a 0%, #10301f 45%, #06120b 100%); }
-body[data-verse='2'] { background: radial-gradient(ellipse at 30% 20%, #4d321d 0%, #33200f 45%, #120a05 100%); }
-body[data-verse='3'] { background: radial-gradient(ellipse at 30% 20%, #1d3f4d 0%, #0f2a33 45%, #050f12 100%); }
+/* --space is the verse's own (verses.js), so the page matches the fog. */
+body[data-verse] { background: radial-gradient(ellipse at 30% 20%, color-mix(in srgb, var(--space), #fff 12%) 0%, var(--space) 45%, color-mix(in srgb, var(--space), #000 60%) 100%); }
 body[data-verse='1'] #stars { filter: hue-rotate(80deg); }
 body[data-verse='2'] #stars { filter: hue-rotate(160deg); }
 body[data-verse='3'] #stars { filter: hue-rotate(240deg); }
@@ -589,6 +588,19 @@ body[data-verse='3'] #stars { filter: hue-rotate(240deg); }
 .verses button[aria-current] { background: var(--portal); cursor: default; }
 .verses button:disabled { opacity: 0.55; cursor: default; }
 .verses .n { font-size: 11px; padding: 0 6px; border-radius: 999px; background: rgba(28, 23, 20, 0.12); }
+.verses button.up { margin-left: 8px; background: #c9ee5a; }
+.verses button.up:hover { background: #dcff7a; }
+.verses button.up kbd { margin: 0; }
+.verses .depth {
+  margin-left: 8px; padding: 4px 10px;
+  font: 800 12px Nunito, system-ui;
+  color: #ffd6fb;
+  background: rgba(42, 22, 48, 0.85);
+  border: 2px solid #e53fd9;
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(229, 63, 217, 0.45);
+  white-space: nowrap;
+}
 .verses i.waiting { width: 9px; height: 9px; border-radius: 50%; background: var(--waiting, #ffd24a); box-shadow: 0 0 6px #ffd24a; }
 
 /* The battery's floating tag, styled like an agent's plate. */
@@ -624,6 +636,9 @@ body[data-verse='3'] #stars { filter: hue-rotate(240deg); }
   animation: vortex 1.4s linear infinite;
 }
 .wipe .name, .wipe .sub { position: relative; }
+/* Into the battery, or through the portal: a plain wash of its colour, no swirl, no words. */
+.wipe.flash { background: radial-gradient(circle, color-mix(in srgb, var(--flash) 75%, #fff) 0%, var(--flash) 70%); }
+.wipe.flash::before, .wipe.flash .name, .wipe.flash .sub { display: none; }
 .wipe .name {
   font: 400 clamp(40px, 8vw, 88px) 'Luckiest Guy', system-ui;
   color: var(--paper);

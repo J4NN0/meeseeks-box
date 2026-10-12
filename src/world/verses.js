@@ -23,6 +23,8 @@ const NESTED = [
     sky: '#f1ecff',
     sign: { title: 'MICROVERSE', sub: '✦ this office powers the car ✦', glow: ['#6dff4a', '#b6ff8a'], core: '#f0ffe3' },
     neon: '#97ce4c',
+    // The dark beyond the battery's glass: its fog, and the page behind (style.css).
+    space: '#10301f',
   },
   {
     name: 'Miniverse',
@@ -32,6 +34,7 @@ const NESTED = [
     sky: '#fff0e0',
     sign: { title: 'MINIVERSE', sub: '✦ a battery inside a battery ✦', glow: ['#ff9a2e', '#ffc27a'], core: '#fff1de' },
     neon: '#ffa53d',
+    space: '#33200f',
   },
   {
     name: 'Teenyverse',
@@ -41,6 +44,7 @@ const NESTED = [
     sky: '#eaf8ff',
     sign: { title: 'TEENYVERSE', sub: "✦ it's batteries all the way down ✦", glow: ['#35c8ff', '#8ee3ff'], core: '#e6f9ff' },
     neon: '#4fd2ff',
+    space: '#0f2a33',
   },
 ];
 

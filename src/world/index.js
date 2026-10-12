@@ -4,6 +4,8 @@ import { CHAIR_Z, Desk } from './desk.js';
 import { Effects } from './effects.js';
 import { createMeeseeksBox } from './box.js';
 import { createBattery } from './battery.js';
+import { BACKDROP_FOG, createBackdrop } from './backdrop.js';
+import { createPowerLine } from './power.js';
 import { verse } from './verses.js';
 import { DOOR, LIVING_ROOM } from './house/index.js';
 import { nearestOnPath } from './paths.js';
@@ -38,6 +40,14 @@ export class World {
     this.scene = scene;
     this.level = level;
     this.room = buildRoom(scene, { theme: verse(level), ...boards });
+    // Inside a battery: its glass all around, and the batteries it's in.
+    if (level > 0) {
+      scene.add(createBackdrop(level));
+      scene.fog = new THREE.Fog(verse(level).space, BACKDROP_FOG.near, BACKDROP_FOG.far);
+      // And it powers the office upstairs (see Multiverse.updateBatteries).
+      this.power = createPowerLine({ to: verse(level - 1).name });
+      scene.add(this.power.group);
+    }
     this.effects = new Effects(scene);
     this.battery = createBattery({ inside: verse(level + 1).name, onEnter: () => onEnterGate?.(level + 1) });
     scene.add(this.battery.group);
@@ -183,6 +193,7 @@ export class World {
     this.room.update(dt, t, camera);
     this.box.update(dt, t);
     this.battery.update(dt, t);
+    this.power?.update(dt, t);
     this.effects.update(dt);
     for (const d of this.desks) d.update(dt, t, now);
   }

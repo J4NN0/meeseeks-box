@@ -126,6 +126,11 @@ export class Hud {
     this.verses.innerHTML = list.map((v, i) => `${i ? '<span class="sep">›</span>' : ''}<button type="button" data-level="${v.level}"${v.level === active ? ' aria-current="true"' : ''}${v.open ? '' : ' disabled'} title="${v.level === active ? `You're in the ${esc(v.name)}` : `Go to the ${esc(v.name)}`}">
       <span>${v.level ? '🔋' : '🏠'} ${esc(v.name)}</span><span class="n">${v.count}</span>${v.waiting ? '<i class="waiting" title="Someone here needs you"></i>' : ''}
     </button>`).join('');
+    // Inside the battery: one obvious way back up, as Esc does.
+    const up = list.find((v) => v.level === active - 1);
+    if (up) this.verses.insertAdjacentHTML('beforeend', `<button type="button" class="up" data-level="${up.level}" title="Climb out of the battery, back up to the ${esc(up.name)}">⬆ Back to the ${esc(up.name)} <kbd>Esc</kbd></button>`);
+    // How deep you are: a battery per level, and how small that makes you.
+    if (active > 0) this.verses.insertAdjacentHTML('beforeend', `<span class="depth" title="Each battery shrinks you a thousand times">${'🔋'.repeat(active)} ${active} level${active === 1 ? '' : 's'} deep · scale 1 : ${scale(active)}</span>`);
   }
 
   announce(type, agent) {
@@ -343,4 +348,11 @@ const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', min
 function ago(ms) {
   if (ms < 5000) return 'now';
   return `${formatDuration(ms).split(' ')[0]} ago`;
+}
+
+/** 1 : 1,000 per battery, written out while it fits, then as a power of ten. */
+function scale(level) {
+  if (level <= 3) return (1000 ** level).toLocaleString('en-US');
+  const sup = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  return `10${String(level * 3).split('').map((d) => sup[d]).join('')}`;
 }

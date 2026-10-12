@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PALETTE, box, cyl, glow, mesh, noInk, ownToon, rng, sphere, toon } from '../engine/toon.js';
 import { createPortal } from './portal.js';
+import { verse } from './verses.js';
 import { createChristmasLights } from './christmas-lights.js';
 import { createCoffeeBar } from './coffee-bar.js';
 import { createArcade } from './arcade.js';
@@ -127,6 +128,11 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   portal.group.rotation.y = Math.PI / 2;
   room.add(portal.group);
   updaters.push((dt, t) => portal.update(t));
+  // Inside the battery, Rick's portal is the way back out, up a level.
+  if (theme.level > 0) {
+    portal.group.traverse((o) => { if (o.isMesh) o.userData.portal = true; });
+    room.add(exitSign(PORTAL.x + 0.03, PORTAL.y + PORTAL.radius + 0.42, PORTAL.z, verse(theme.level - 1).name));
+  }
 
   room.add(poster(1.45, 2.35, -5.96, 'WUBBA LUBBA', 'DUB DUB SHIP IT', '#97ce4c', 0));
   // Its back to the wall, facing the beanbags.
@@ -363,6 +369,38 @@ function plant(x, z, h, seed) {
     stem.add(leaf);
     g.add(stem);
   }
+  return g;
+}
+
+/** A green neon "EXIT" over the portal, saying where it goes. Faces +x, off the left wall. */
+function exitSign(x, y, z, to) {
+  const { canvas, ctx, texture } = canvasTexture(512, 136);
+  ctx.fillStyle = '#10180f';
+  ctx.beginPath();
+  ctx.roundRect(4, 4, 504, 128, 22);
+  ctx.fill();
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = '#2c4a22';
+  ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#6dff4a';
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = '#d8ffc0';
+  ctx.font = "64px 'Luckiest Guy', Impact, sans-serif";
+  ctx.fillText('⬆ EXIT', canvas.width / 2, 56);
+  ctx.shadowBlur = 10;
+  ctx.font = "800 26px Nunito, system-ui, sans-serif";
+  ctx.fillStyle = '#b6ff8a';
+  ctx.fillText(`back up to the ${to}`.toUpperCase(), canvas.width / 2, 108);
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = Math.PI / 2;
+  g.add(box(1.5, 0.42, 0.04, '#1b2419', 0, 0, -0.02, { cast: false }));
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(1.44, 0.38), new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
+  face.position.z = 0.002;
+  face.userData.portal = true;
+  g.add(noInk(face));
   return g;
 }
 

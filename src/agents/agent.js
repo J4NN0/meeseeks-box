@@ -14,6 +14,15 @@ const SIP = { reach: 0.55, lift: 0.6, drink: 1.3, lower: 0.6, letGo: 0.45 };
 const SIP_S = SIP.reach + SIP.lift + SIP.drink + SIP.lower + SIP.letGo;
 /** Getting up: how long the chair takes to swivel round before it stands. */
 const RISE_S = 0.6;
+/**
+ * Into the battery, as Rick and Morty go into the Microverse: the remote
+ * goes off, the box's ray locks on (`aim`), it shrinks to nothing on the
+ * spot with a wobble (`shrink`), then zips into the box (`zip`). Coming out
+ * deeper down, it drops out of the sky in a ray, growing back (`DROP_S`).
+ */
+const SHRINK = { aim: 0.45, shrink: 0.65, zip: 0.35 };
+const DROP_S = 0.9;
+const DROP_HEIGHT = 5;
 
 const tmp = new THREE.Vector3();
 const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 0, 0.5), new THREE.Vector3(-0.98, 0, -0.15)];
@@ -33,7 +42,7 @@ const HELPER_SPOTS = [new THREE.Vector3(-0.98, 0, 0.5), new THREE.Vector3(0.98, 
  * desk, now and then it gets up for a coffee (`takeBreak`) and comes back.
  */
 export class Agent {
-  constructor(session, world, { onClick, now, instant = false, entry = 'box' }) {
+  constructor(session, world, { onClick, now, instant = false, entry = 'box', passing = false }) {
     this.id = session.id;
     this.session = session;
     this.world = world;
@@ -72,11 +81,14 @@ export class Agent {
     this.character = this.makeCharacter();
     world.scene.add(this.character.root);
 
-    this.desk = world.claimDesk(this);
-    this.lounge = this.desk ? null : world.claimLounge(this);
+    // Passing through: the office is full, so it heads straight on into the
+    // battery, to work in the universe in there.
+    this.passing = passing;
+    this.desk = passing ? null : world.claimDesk(this);
+    this.lounge = this.desk || passing ? null : world.claimLounge(this);
     // What it sits on: its desk's chair, or one at the meeting table.
     this.chair = this.desk;
-    this.target = this.desk ? this.desk.approachWorld() : this.lounge.position.clone();
+    this.target = this.desk ? this.desk.approachWorld() : this.lounge ? this.lounge.position.clone() : world.battery.mouth.clone();
     this.buildLabel();
     if (instant) {
       this.settle(now);
@@ -92,6 +104,13 @@ export class Agent {
       world.battery.zap();
       world.effects.poof(this.emergeFrom, { scale: 0.5, count: 10 });
       this.say(line('up'), 2.4);
+    } else if (entry === 'above') {
+      // Shrunk into the battery upstairs: it drops in from the sky in a ray.
+      this.spawnPoint = world.spawnPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.3));
+      this.dropFrom = this.spawnPoint.clone().setY(DROP_HEIGHT);
+      this.path = world.pathTo(this.target);
+      world.effects.beam(this.dropFrom.clone().setY(DROP_HEIGHT + 2), this.aim(), { life: DROP_S + 0.35, color: '#9dff5a', width: 1.1 });
+      this.say(line('landed'), 2.4);
     } else {
       // Jitter the spawn spot so back-to-back arrivals don't overlap.
       this.spawnPoint = world.spawnPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.3));
@@ -100,7 +119,7 @@ export class Agent {
       world.effects.poof(this.spawnPoint.clone().add(new THREE.Vector3(0, 0.1, 0)), { scale: 1.1 });
       this.say(line('spawn'), 2.6);
     }
-    this.character.root.position.copy(this.spawnPoint);
+    this.character.root.position.copy(this.dropFrom || this.spawnPoint);
     this.character.root.scale.setScalar(0.01);
     this.character.setMood('cheer');
   }
@@ -254,7 +273,7 @@ export class Agent {
     }
     const chair = this.place.chair;
     const seated = chair && (this.phase === 'meeting' || this.phase === 'sitting');
-    this.target = this.desk ? this.desk.approachWorld() : this.lounge.position.clone();
+    this.target = this.desk ? this.desk.approachWorld() : this.lounge ? this.lounge.position.clone() : this.world.battery.mouth.clone();
     this.returning = true;
     if (seated && !instant) {
       this.say(line('release'), 2.2);
@@ -512,7 +531,8 @@ export class Agent {
     this.say(line(reason !== 'ended' ? reason : this.awaiting ? 'skip' : 'done'), 1.6);
   }
 
-  depart() {
+  /** Walks over to the car and shrinks into its battery; `why` picks what it says. */
+  depart(why = 'down') {
     const root = this.character.root;
     // Back to the aisle behind the chairs first, not through the next chair.
     const away = this.place || this.returning || this.backFromBar || this.phase === 'coffee';
@@ -544,11 +564,64 @@ export class Agent {
     this.path = [...start, ...this.world.pathToBattery(start.at(-1))];
     this.speed = WALK_SPEED;
     this.sink = 0;
+    this.sinkFrom = null;
     this.setPhase('departing');
-    this.say(line('down'), 2.4);
+    this.say(line(why), 2.4);
   }
 
   // ------------------------------------------------------------ per frame
+
+  /** A point in its middle, that follows it as it shrinks: what the battery's ray aims at. */
+  aim() {
+    if (!this.aimPoint) {
+      this.aimPoint = new THREE.Object3D();
+      this.aimPoint.position.y = this.character.headHeight * 0.5;
+      this.character.root.add(this.aimPoint);
+    }
+    return this.aimPoint;
+  }
+
+  /** Caught in the battery's ray: turns to it, shrinks with a wobble, and zips in. */
+  shrinkIntoBattery(dt) {
+    const c = this.character;
+    const root = c.root;
+    const core = this.world.battery.core;
+    this.sink += dt;
+    const t = this.sink;
+    c.setMode('stand');
+    c.setMood('cheer');
+    root.rotation.y = dampAngle(root.rotation.y, Math.atan2(core.x - root.position.x, core.z - root.position.z), 8, dt);
+    if (t < SHRINK.aim) {
+      // Caught: a shiver, up on its toes.
+      root.position.copy(this.sinkFrom);
+      root.position.x += Math.sin(t * 70) * 0.012;
+      root.position.y += Math.min(1, t / SHRINK.aim) * 0.06;
+      return;
+    }
+    if (t < SHRINK.aim + SHRINK.shrink) {
+      // Smaller and smaller, stretching and squashing as it goes.
+      const k = (t - SHRINK.aim) / SHRINK.shrink;
+      const size = 1 - 0.9 * THREE.MathUtils.smootherstep(k, 0, 1);
+      const wobble = Math.sin(k * Math.PI * 4) * 0.22 * (1 - k);
+      root.scale.set(size * (1 - wobble), size * (1 + wobble), size * (1 - wobble));
+      root.position.copy(this.sinkFrom);
+      root.position.y += 0.06 + k * 0.3;
+      return;
+    }
+    // A speck now: in an arc into the box.
+    if (!this.zipFrom) {
+      this.zipFrom = root.position.clone();
+      this.label.visible = false;
+    }
+    const k = Math.min(1, (t - SHRINK.aim - SHRINK.shrink) / SHRINK.zip);
+    hop(root.position, this.zipFrom, core, k * k);
+    root.scale.setScalar(Math.max(0.01, 0.1 * (1 - k)));
+    if (k >= 1) {
+      this.world.battery.zap();
+      this.world.effects.sparkBurst(core.clone().add(new THREE.Vector3(0, 0.1, 0)), { scale: 0.35, count: 7, size: 0.7 });
+      this.destroy();
+    }
+  }
 
   /** A desk freed up: walk over from the lounge. */
   moveToDesk(desk) {
@@ -581,13 +654,26 @@ export class Agent {
 
     switch (this.phase) {
       case 'arriving': {
-        const k = Math.min(1, this.phaseTime / 0.5);
-        root.scale.setScalar(elasticOut(k));
-        if (this.emergeFrom) hop(root.position, this.emergeFrom, this.spawnPoint, k);
         c.setMode('stand');
-        c.setMood(this.phaseTime > 1.25 ? 'wait' : 'cheer');
         root.rotation.y = damp(root.rotation.y, 0, 6, dt);
-        if (this.phaseTime > 1.25 && !this.awaiting) {
+        if (this.dropFrom) {
+          // Down the ray, tiny, and back to full size just before landing.
+          const k = Math.min(1, this.phaseTime / DROP_S);
+          root.position.lerpVectors(this.dropFrom, this.spawnPoint, 1 - (1 - k) ** 2.2);
+          root.scale.setScalar(0.06 + 0.94 * elasticOut(THREE.MathUtils.clamp((k - 0.45) / 0.55, 0, 1)));
+          if (k >= 1 && !this.landed) {
+            this.landed = true;
+            this.world.effects.poof(this.spawnPoint, { scale: 0.7, count: 10 });
+          }
+        } else {
+          const k = Math.min(1, this.phaseTime / 0.5);
+          root.scale.setScalar(elasticOut(k));
+          if (this.emergeFrom) hop(root.position, this.emergeFrom, this.spawnPoint, k);
+        }
+        const ready = this.phaseTime > (this.dropFrom ? DROP_S + 0.8 : 1.25);
+        c.setMood(ready && !this.passing ? 'wait' : 'cheer');
+        if (ready && this.passing) this.depart('full');
+        else if (ready && !this.awaiting) {
           if (this.session.box) this.say(line('task'), 2.2);
           this.setPhase('walking');
         }
@@ -629,23 +715,18 @@ export class Agent {
         break;
       }
       case 'departing': {
-        if (!this.walkPath(dt)) {
-          c.setMode('walk');
-          break;
+        if (!this.sinkFrom) {
+          if (!this.walkPath(dt)) {
+            c.setMode('walk');
+            break;
+          }
+          // Beside the car: the remote goes off and the ray locks on.
+          this.sinkFrom = root.position.clone();
+          this.sink = 0;
+          this.world.battery.press();
+          this.world.effects.beam(this.world.battery.core, this.aim(), { life: SHRINK.aim + SHRINK.shrink + SHRINK.zip + 0.15 });
         }
-        // Beside the car: hop up into the box in the engine bay, shrinking.
-        c.setMode('stand');
-        c.setMood('cheer');
-        if (this.sink === 0) this.sinkFrom = root.position.clone();
-        this.sink += dt;
-        const k = Math.min(1, this.sink / 0.45);
-        hop(root.position, this.sinkFrom, this.world.battery.core, k);
-        root.scale.setScalar(Math.max(0.02, (1 - k) ** 1.5));
-        if (k >= 1) {
-          this.world.battery.zap();
-          this.world.effects.poof(this.world.battery.core, { scale: 0.45, count: 8 });
-          this.destroy();
-        }
+        this.shrinkIntoBattery(dt);
         break;
       }
       case 'turning': {

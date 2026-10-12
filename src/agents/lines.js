@@ -12,6 +12,8 @@ const LINES = {
   skip: ['Nothing? Ooh, okay! *poof*', 'No task? Caaan go! *poof*', 'Ooh, never mind, then! *poof*'],
   helper: ['I’m Mr. Meeseeks too!', 'Summoned to help!'],
   down: ['Into the battery! Caaan do!', 'Ooh, I’ll work from the battery!', 'Look at me, I’m powering the car!'],
+  full: ['No desks left? I’ll work from the battery!', 'Office is full! Into the battery!', 'Ooh, a desk in the battery! Caaan do!'],
+  landed: ['Ooh, wee! I’m tiny!', 'I’m Mr. Meeseeks! In a battery!', 'Look at me, I’m powering the car!'],
   up: ['Ooh, a desk upstairs!', 'Going up! Look at me!', 'Out of the battery! Caaan do!'],
   meeting: ['Ooh, a meeting! Look at me!', 'Meeting time! Caaan do!', 'Ooh, are there snacks?'],
   release: ['Back to the task! Caaan do!', 'Ooh, that could have been an email!', 'Great meeting! Look at me go!'],

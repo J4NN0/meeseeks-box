@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { World } from './world/index.js';
 import { verse } from './world/verses.js';
 import { AgentManager } from './agents/manager.js';
-import { Seating } from './agents/seating.js';
+import { CAPACITY, Seating } from './agents/seating.js';
 import { agentColor } from './characters/index.js';
 import { disposeScene } from './engine/dispose.js';
 import { visualStatus } from './status.js';
@@ -76,6 +76,8 @@ export class Multiverse {
     this.needed = 1;
     this.active = this.universes[0];
     this.meeting = false;
+    // Past the first sync, arrivals are newcomers (passers can come through).
+    this.synced = false;
     this.build(this.active);
   }
 
@@ -155,10 +157,21 @@ export class Multiverse {
       const entries = new Map();
       for (const [id, m] of moves) {
         if (m.from === level) departures.set(id, m.to > level ? 'down' : 'up');
-        if (m.to === level) entries.set(id, m.from > level ? 'battery' : 'box');
+        if (m.to === level) entries.set(id, m.from > level ? 'battery' : 'above');
       }
+      // Newcomers deeper down drop in from the battery upstairs, where you
+      // may have just watched them go in.
+      if (level > 0) for (const s of u.sessions) if (arrivals.has(s.id)) entries.set(s.id, 'above');
       u.manager.sync(u.sessions, now, { instant: u !== this.active, departures, entries });
     });
+    // The office you're in is full: a newcomer seated deeper down still comes
+    // out of its box, then walks to the car and into the battery. Not on the
+    // first sync: everyone running already isn't new.
+    if (this.synced) {
+      const deeper = levels.slice(this.active.level + 1).flat();
+      this.active.manager.pass(deeper.filter((s) => arrivals.has(s.id)), new Set(deeper.map((s) => s.id)));
+    }
+    this.synced = true;
     this.closeUnneeded();
     this.updateBatteries();
     if (this.active.level >= this.needed) this.onCollapse?.();
@@ -207,6 +220,8 @@ export class Multiverse {
       // Only the universe right inside: the one the tag names.
       const inside = u.level + 1 < this.needed ? this.universes[u.level + 1].sessions : [];
       u.world.battery.set({ open: u.level + 1 < this.needed, count: inside.length, waiting: inside.filter((s) => s.status === 'waiting').length });
+      // Inside a battery: how hard this office is powering the one upstairs.
+      u.world.power?.set(u.sessions.filter((s) => s.status === 'working').length / CAPACITY);
     }
   }
 

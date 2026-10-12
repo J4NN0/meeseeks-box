@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { ownToon } from '../engine/toon.js';
+import { noInk, ownToon } from '../engine/toon.js';
 import { END, HIT, SlapHand, UP, unpickable } from './hand.js';
 
 // Cartoon "poof" clouds. Opaque puffs that pop and shrink, rather than
@@ -11,6 +11,11 @@ const puffGeometry = new THREE.IcosahedronGeometry(1, 2);
 puffGeometry.userData.shared = true;
 
 const _scale = new THREE.Vector3();
+const _end = new THREE.Vector3();
+
+// A cone along +z, its point at the origin and its open end at z = 1.
+const beamGeometry = new THREE.ConeGeometry(0.5, 1, 20, 1, true).rotateX(-Math.PI / 2).translate(0, 0, 0.5);
+beamGeometry.userData.shared = true;
 
 // What a slap shouts as it lands, and how many sparks fly off it.
 const SLAP_WORDS = ['SLAP!', 'SLAP!', 'SMACK!', 'WHAP!'];
@@ -25,6 +30,49 @@ export class Effects {
     this.material = ownToon('#f4f6f2');
     this.sparkMaterial = new THREE.MeshBasicMaterial({ color: '#fff27a' });
     this.sparkGeometry = new THREE.OctahedronGeometry(0.05, 0);
+    this.beams = [];
+  }
+
+  /**
+   * The battery's shrink ray: a cone of light from `from` (a point) to
+   * `to` (an Object3D it follows, or a point), flickering, that fades out
+   * after `life` seconds. Its narrow end is at `from`.
+   */
+  beam(from, to, { life = 1.4, color = '#ff4fd8', width = 0.45 } = {}) {
+    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    const mesh = unpickable(noInk(new THREE.Mesh(beamGeometry, material)));
+    mesh.castShadow = false;
+    this.scene.add(mesh);
+    const beam = { mesh, from: from.clone(), to, life, width, age: 0 };
+    this.placeBeam(beam);
+    this.beams.push(beam);
+    return beam;
+  }
+
+  placeBeam(b) {
+    const end = b.to.isObject3D ? b.to.getWorldPosition(_end) : _end.copy(b.to);
+    const length = Math.max(0.01, b.from.distanceTo(end));
+    b.mesh.position.copy(b.from);
+    b.mesh.lookAt(end);
+    b.mesh.scale.set(b.width, b.width, length);
+  }
+
+  updateBeams(dt) {
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i];
+      b.age += dt;
+      const k = b.age / b.life;
+      if (k >= 1 || (b.to.isObject3D && !this.holds(b.to))) {
+        b.mesh.removeFromParent();
+        b.mesh.material.dispose();
+        this.beams.splice(i, 1);
+        continue;
+      }
+      this.placeBeam(b);
+      // Snaps on, flickers, and fades as it lets go.
+      const on = Math.min(1, b.age / 0.08) * (k > 0.75 ? (1 - k) / 0.25 : 1);
+      b.mesh.material.opacity = on * (0.42 + Math.sin(b.age * 55) * 0.12);
+    }
   }
 
   /**
@@ -81,7 +129,11 @@ export class Effects {
     while (this.slaps.length) this.dropSlap(this.slaps.length - 1);
     for (const b of this.bursts) b.label.removeFromParent();
     for (const p of this.puffs) p.mesh.removeFromParent();
-    this.bursts.length = this.puffs.length = 0;
+    for (const b of this.beams) {
+      b.mesh.removeFromParent();
+      b.mesh.material.dispose();
+    }
+    this.bursts.length = this.puffs.length = this.beams.length = 0;
   }
 
   holds(object) {
@@ -148,6 +200,7 @@ export class Effects {
 
   update(dt) {
     this.updateSlaps(dt);
+    this.updateBeams(dt);
     for (let i = this.bursts.length - 1; i >= 0; i--) {
       const b = this.bursts[i];
       b.age += dt;

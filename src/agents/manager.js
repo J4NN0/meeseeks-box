@@ -6,8 +6,12 @@ import { CoffeeArea } from './coffee-break.js';
 // (and smooths over flaky polls), so whatever isn't in the list leaves now.
 // During a meeting everyone here goes to the meeting room, newcomers too.
 // Now and then someone napping at its desk goes for a coffee (coffee-break.js).
+// A newcomer with no desk left here, in this office or any above it, still
+// comes out of this box, then walks on into the car battery (`pass`).
 
 const SPAWN_STAGGER_S = 1.3;
+/** At most this many walk through here into the battery at once: a few, not a parade. */
+const MAX_PASSERS = 4;
 /** Called to (or out of) a meeting, they get up one after another, this far apart. */
 const MEETING_STAGGER_S = 0.28;
 
@@ -15,6 +19,8 @@ export class AgentManager {
   constructor(world, { onClick } = {}) {
     this.world = world;
     this.agents = new Map();
+    // On their way through to the universe in the battery: not seated here.
+    this.passers = new Set();
     this.onClick = onClick;
     this.queue = [];
     this.spawnCooldown = 0;
@@ -61,7 +67,7 @@ export class AgentManager {
   /**
    * `instant` skips every animation (for offices you aren't looking at).
    * `departures` says why an agent left (id -> 'down' | 'up', default
-   * 'ended'); `entries` how an arrival comes in (id -> 'box' | 'battery').
+   * 'ended'); `entries` how an arrival comes in (id -> 'box' | 'battery' | 'above').
    */
   sync(sessions, now, { instant = false, departures, entries } = {}) {
     const incoming = new Map(sessions.map((s) => [s.id, s]));
@@ -77,7 +83,8 @@ export class AgentManager {
         agent.leave(departures?.get(id));
       }
     }
-    this.queue = this.queue.filter((q) => incoming.has(q.session.id));
+    if (instant) this.dropPassers();
+    this.queue = this.queue.filter((q) => q.entry === 'pass' || incoming.has(q.session.id));
     for (const s of sessions) {
       const agent = this.agents.get(s.id);
       if (agent) {
@@ -95,7 +102,35 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Newcomers seated deeper down: out of the box here, and on into the
+   * battery. `deeper` holds the ids of everyone seated below, so one queued
+   * that has since ended or moved up here stays in.
+   */
+  pass(arrivals, deeper) {
+    this.queue = this.queue.filter((q) => q.entry !== 'pass' || deeper.has(q.session.id));
+    let room = MAX_PASSERS - this.passers.size - this.queue.filter((q) => q.entry === 'pass').length;
+    for (const session of arrivals) if (room-- > 0) this.queue.push({ session, entry: 'pass' });
+  }
+
+  dropPassers() {
+    for (const agent of this.passers) agent.destroy();
+    this.passers.clear();
+    this.queue = this.queue.filter((q) => q.entry !== 'pass');
+  }
+
   spawn(session, now, opts) {
+    if (opts?.entry === 'pass') {
+      const agent = new Agent(session, this.world, { onClick: this.onClick, now, passing: true });
+      this.passers.add(agent);
+      return agent;
+    }
+    // Seated here after all while still passing through: just the one of it.
+    for (const passer of this.passers) {
+      if (passer.id !== session.id) continue;
+      passer.destroy();
+      this.passers.delete(passer);
+    }
     const agent = new Agent(session, this.world, { onClick: this.onClick, now, ...opts });
     this.agents.set(session.id, agent);
     // Built mid-meeting while you weren't looking: it's already in there.
@@ -107,7 +142,9 @@ export class AgentManager {
     // Spawn one at a time so a page load with ten sessions becomes a parade.
     this.spawnCooldown -= dt;
     if (this.queue.length && this.spawnCooldown <= 0) {
-      const { session, entry } = this.queue.shift();
+      // Newcomers to this office go before anyone just passing through.
+      const next = this.queue.findIndex((q) => q.entry !== 'pass');
+      const [{ session, entry }] = this.queue.splice(Math.max(next, 0), 1);
       this.spawn(session, now, { entry });
       this.spawnCooldown = SPAWN_STAGGER_S;
     }
@@ -123,6 +160,11 @@ export class AgentManager {
       if (agent.phase === 'gone') this.agents.delete(id);
       else if (agent.phase === 'walking' || agent.phase === 'convening' || agent.phase === 'departing') this.world.passing(agent.character.root.position);
     }
+    for (const agent of this.passers) {
+      agent.tick(dt, t, now, camera);
+      if (agent.phase === 'gone') this.passers.delete(agent);
+      else this.world.passing(agent.character.root.position);
+    }
     this.coffee.tick(dt, this.agents.values(), this.meeting);
     const lounger = [...this.agents.values()].find((a) => a.phase === 'lounging');
     const desk = lounger && this.world.fillOrder.find((d) => d.free);
@@ -130,13 +172,14 @@ export class AgentManager {
   }
 
   byId(id) {
-    return this.agents.get(id);
+    return this.agents.get(id) || [...this.passers].find((a) => a.id === id);
   }
 
   /** Removes everyone at once, no poofs: the office is being torn down. */
   clear() {
     for (const agent of this.agents.values()) agent.destroy();
     this.agents.clear();
+    this.dropPassers();
     this.queue = [];
   }
 }
