@@ -1,39 +1,29 @@
-# Meeseeks
+# Meeseeks Box
 
-A cartoon 3D office where your running agent sessions show up as agents working at their desks.
+A cartoon 3D office for your Claude Code and Codex sessions. Running agents appear at desks, with their activity and status reflected in the scene. Click one to inspect its conversation and resume command. You can also summon a Claude Code agent from the box, choose a project folder, and give it a task.
 
-Each new session pops out of the box as a little character. It walks to a desk, its monitor shows what the session is doing, and when the session ends it vanishes with a *poof*.
+## Run it
 
-## Quick start
-
-Requires Node 20.19+ (or 22.12+) on macOS or Linux.
+Requires Node.js 20.19+ (or 22.12+) on macOS or Linux.
 
 ```bash
 npm install
 npm run dev
 ```
 
-For a production build, use `npm run serve`.
+Open the local URL printed by Vite (normally `http://127.0.0.1:5199`). The office finds sessions in `~/.claude` and `~/.codex` automatically.
 
-### Simulating agents
+For a built version, run `npm run serve` and open the URL it prints.
 
-To try the office with lots of agents without running any, open the dev server with `?sim` (16 pretend agents), or `?sim=N` to start with N (0 to 48), e.g. `http://127.0.0.1:5199/?sim=30`. A panel in the corner adds and removes agents, sets them all working, waiting, napping or stressed (or a mix), sends the nappers for a coffee, and with **Live changes** has them come, go and switch status on their own. The box adds a pretend agent too. Nothing reaches your real sessions, and it only works in `npm run dev`.
+To send prompts or answer permission requests for a Claude Code session started outside the box, start that session with `./bin/claude-box` instead of `claude`. It accepts the same arguments. Agents summoned from the box use this connection automatically.
 
-## What you'll see
+## Debug
 
-- **Typing**: the session is working.
-- **Waving at you**: it's waiting for your input.
-- **Snoring**: idle for a while.
-- **"Existence is pain!"**: the current turn has been running for a long time.
-- **Mini mascots by the desk**: subagents at work.
-
-Click an agent to see its details, recent activity and a button that copies the resume command.
+Add `?sim` to the dev URL (e.g., `http://127.0.0.1:5199/?sim=10`) to see simulated agents without running any sessions, or use `?sim=N` for a custom count (up to 48). The simulation panel lets you change their statuses and watch them come and go. Simulation works only with `npm run dev` and does not affect real sessions.
 
 ## How it works
 
-A small local server reads the session files Claude Code and Codex already write (`~/.claude` and `~/.codex`) and the page polls it every couple of seconds. It only reads, never writes, and listens on `127.0.0.1` only, since the data includes snippets of your transcripts.
-
-Everything in the scene is procedural three.js: no models or textures.
+A local server reads Claude Code and Codex session files and serves their activity to a three.js scene. The server listens on `127.0.0.1` by default because the activity can include conversation excerpts. Summoning agents and sending prompts or permission decisions can affect your project files through Claude Code.
 
 ## License
 
