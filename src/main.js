@@ -211,7 +211,7 @@ function focusAgent(agent) {
 let focusedBoard = null;
 const boardFaces = () => {
   const { room } = here().world;
-  return [room.tvScreen, room.wbFace, ...room.living.meeting.calls.faces()];
+  return [room.tvScreen, room.wbFace, room.living.meeting.agenda.face, ...room.living.meeting.calls.faces()];
 };
 
 /**
@@ -274,6 +274,8 @@ function act(action) {
     goToAgent(action.agentId);
   } else if (action.kind === 'call-agent') {
     openCallAgent(action.agentId);
+  } else if (action.kind === 'agenda-page') {
+    here().world.room.living.meeting.agenda.pageBy(action.step);
   } else if (action.kind === 'project') {
     openProject(action.key, action.focus);
   } else if (action.kind === 'limits') {
@@ -393,11 +395,12 @@ function toggleMeeting() {
   multiverse.setMeeting(on);
   meeting.bell.ring();
   hud.setMeeting(on);
+  meeting.agenda.set(multiverse.roster(Date.now()), on, Date.now());
   // Only so many universes fit on screen; the toast names those.
   const calls = meeting.calls.set(multiverse.calls(Date.now()), Date.now());
   if (on) {
     const remote = calls.map((c) => `the ${c.name}`);
-    hud.toast(`📣 Meeting! Everyone to the meeting room.${remote.length ? ` ${remote.join(' and ')} join${remote.length > 1 ? '' : 's'} on screen.` : ''}`);
+    hud.toast(`📣 Meeting! Everyone to the meeting room.${remote.length ? ` ${remote.join(' and ')} join${remote.length > 1 ? '' : 's'} on screen.` : ''} The digital agenda is by the wall.`);
     if (view === 'orbit') {
       focused = null;
       leaveBoard();
@@ -407,7 +410,7 @@ function toggleMeeting() {
   } else {
     hud.toast('👋 Meeting\'s over: back to work, everyone!');
     // Looking at a screen that's going away: back out.
-    if (focusedBoard && meeting.calls.faces().some((f) => f.userData.board === focusedBoard)) unfocus();
+    if (focusedBoard === meeting.agenda.board || focusedBoard && meeting.calls.faces().some((f) => f.userData.board === focusedBoard)) unfocus();
   }
 }
 
@@ -439,6 +442,12 @@ function goToAgent(id, retried = false) {
 /** The panel's ✕: on a board, just close it; otherwise go back out. */
 function closePanel() {
   if (traveling) return;
+  // A meeting chat opened without a board close-up did not move the camera.
+  if (view === 'orbit' && !focused && !focusedBoard && multiverse.meeting && hud.selected?.level !== undefined) {
+    focused = null;
+    hud.hidePanel();
+    return;
+  }
   if (!focusedBoard || view !== 'orbit') return unfocus();
   if (!hud.panelOpen) return unfocus();
   hud.hidePanel();
@@ -974,6 +983,7 @@ renderer.setAnimationLoop((timestamp) => {
     const agents = multiverse.roster(now);
     dashboard.draw(agents, now, { offline: feed.state === 'offline', today: today.data });
     here().world.room.living.meeting.calls.set(multiverse.calls(now), now);
+    here().world.room.living.meeting.agenda.set(agents, multiverse.meeting, now);
     whiteboard.draw(today.data, agents, now);
     hud.update(agents, feed.state, now, today.data);
   }

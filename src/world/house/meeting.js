@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { CHAIR_COLORS, officeChair } from '../desk.js';
 import { nearestOnPath } from '../paths.js';
 import { ARCH, MEETING_ROOM } from './plan.js';
-import { SETTING, TABLE, createBell, createCoffee, createFlipChart, createMug, createNotepad, createTable, padPaper } from './conference.js';
+import { SETTING, TABLE, createBell, createCoffee, createMug, createNotepad, createTable, padPaper } from './conference.js';
 import { CallScreens } from './call-screen.js';
+import { createAgendaScreen } from './agenda-screen.js';
 
 // What's in the meeting room, and where everyone goes when the meeting's
 // called: ten places at the table (the back row first, so the overview sees
@@ -52,7 +53,8 @@ const RING = [
 const RING_IN = V(ARCH.x, RING[0].z);
 
 const ON_TABLE = { coffee: [-0.25, 0.02], bell: [0.8, 0] };
-const FLIP_CHART = { at: [14.4, 1.35] };
+// The monitor is wider than the old easel. Leave clearance to both walls.
+const AGENDA_AT = { x: 14.0, z: 1.8 };
 
 export function buildMeeting() {
   const group = new THREE.Group();
@@ -71,12 +73,11 @@ export function buildMeeting() {
   bell.group.position.set(TABLE_AT.x + ON_TABLE.bell[0], TABLE.top, TABLE_AT.z + ON_TABLE.bell[1]);
   group.add(bell.group);
 
-  const chart = createFlipChart();
-  const [cx, cz] = FLIP_CHART.at;
-  chart.position.set(cx, 0, cz);
-  chart.rotation.y = Math.atan2(TABLE_AT.x - cx, TABLE_AT.z - cz);
-  group.add(chart);
-  colliders.push({ kind: 'circle', x: cx, z: cz, r: 0.4 });
+  const agenda = createAgendaScreen();
+  agenda.group.position.set(AGENDA_AT.x, 0, AGENDA_AT.z);
+  agenda.group.rotation.y = Math.atan2(TABLE_AT.x - AGENDA_AT.x, TABLE_AT.z - AGENDA_AT.z);
+  group.add(agenda.group);
+  colliders.push({ kind: 'circle', x: AGENDA_AT.x, z: AGENDA_AT.z, r: 0.4 });
 
   const paper = padPaper();
   const chairs = SEATS.map((spot, index) => {
@@ -99,6 +100,7 @@ export function buildMeeting() {
     places,
     bell,
     calls,
+    agenda,
     /** Where the walk through the arch joins the walk round the table. */
     door: RING_IN,
     /** Over the table from the front corner, for the overview, with the call screens in. */

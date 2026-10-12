@@ -3,7 +3,8 @@ import { dampAngle, elasticOut } from '../../engine/motion.js';
 import { box, cyl, glow, mesh, noInk, sphere } from '../../engine/toon.js';
 import { STATUS_COLORS, STATUS_LABELS } from '../../status.js';
 import { Board } from '../board.js';
-import { fit, roundRect } from '../screens.js';
+import { inboxLine } from '../mission-control.js';
+import { fit, roundRect, wrap } from '../screens.js';
 
 // During a meeting, agents in the other universes (the garage, or the
 // Microverse and deeper in the car battery) join on floating TVs at the head
@@ -27,7 +28,11 @@ class CallBoard extends Board {
   /** `call` is { level, name, color, agents } with agents as the multiverse roster lists them. */
   draw(call, now) {
     const blink = Math.floor(now / 1000) % 2;
-    const key = JSON.stringify([call.level, call.name, blink, call.agents.map((a) => [a.id, a.colorHex, a.visualStatus, a.session.project, doing(a)])]);
+    const agents = [...call.agents].sort((a, b) => {
+      const aw = a.visualStatus === 'waiting', bw = b.visualStatus === 'waiting';
+      return aw !== bw ? (aw ? -1 : 1) : aw ? (a.session.statusSince || now) - (b.session.statusSince || now) : 0;
+    });
+    const key = JSON.stringify([call.level, call.name, blink, agents.map((a) => [a.id, a.colorHex, a.visualStatus, a.session.project, a.session.title, latest(a, now)])]);
     if (!this.begin(key, [call, now])) return;
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
@@ -56,13 +61,13 @@ class CallBoard extends Board {
     ctx.textAlign = 'left';
 
     // A tile per agent.
-    const n = call.agents.length;
+    const n = agents.length;
     const cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4;
     const rows = Math.ceil(n / cols);
     const X = 24, Y = 92, GAP = 14;
     const tw = (W - 2 * X - (cols - 1) * GAP) / cols;
     const th = Math.min((H - Y - X - (rows - 1) * GAP) / rows, tw * 0.9);
-    call.agents.forEach((a, i) => {
+    agents.forEach((a, i) => {
       const r = Math.floor(i / cols);
       const inRow = Math.min(cols, n - r * cols);
       // The last row, if it's short, is centred.
@@ -82,46 +87,59 @@ class CallBoard extends Board {
     ctx.fillStyle = tint(a.colorHex, hot ? 0.32 : 0.16);
     roundRect(ctx, x, y, w, h, 18);
     ctx.fill();
-    ctx.strokeStyle = a.colorHex;
-    ctx.lineWidth = hot ? 6 : 3;
+    ctx.strokeStyle = status === 'waiting' ? STATUS_COLORS.waiting : a.colorHex;
+    ctx.lineWidth = hot ? 7 : status === 'waiting' ? 5 : 3;
     ctx.stroke();
 
-    // Wide tiles have the face on the left, tall ones on top.
-    const wide = w / h > 1.45;
-    const size = Math.min(wide ? h * 0.36 : h * 0.24, w * 0.22);
-    const cx = wide ? x + 22 + size * 1.15 : x + w / 2;
-    const cy = wide ? y + h / 2 : y + 16 + size * 1.3;
+    // Leave the text room for a request or recent update, even on crowded screens.
+    const size = Math.min(h * 0.29, w * 0.2, 76);
+    const cx = x + 18 + size * 1.15;
+    const cy = y + h / 2;
     drawFace(ctx, a.colorHex, status, cx, cy, size);
 
-    const tx = wide ? cx + size * 1.4 + 14 : x + 14;
-    const tw = wide ? x + w - 14 - tx : w - 28;
-    const fs = Math.round(THREE.MathUtils.clamp(h * 0.14, 18, 34));
-    let ty = wide ? y + h / 2 - fs * 0.6 : cy + size * 1.25 + fs;
-    ctx.textAlign = wide ? 'left' : 'center';
-    const ax = wide ? tx : x + w / 2;
+    const tx = cx + size + 18;
+    const tw = Math.max(32, x + w - 14 - tx);
+    const fs = Math.round(THREE.MathUtils.clamp(h * 0.14, 17, 30));
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#ffffff';
     ctx.font = `800 ${fs}px ${ROUND}`;
-    ctx.fillText(fit(ctx, name, tw), ax, ty);
-    ty += fs * 1.15;
+    ctx.fillText(fit(ctx, name, tw), tx, y + Math.min(36, h * 0.31));
     ctx.fillStyle = STATUS_COLORS[status] || MUTED;
-    ctx.font = `800 ${Math.round(fs * 0.8)}px ${ROUND}`;
-    ctx.fillText(fit(ctx, STATUS_LABELS[status] || status, tw), ax, ty);
-    if (h > 150) {
-      ty += fs * 1.05;
-      ctx.fillStyle = MUTED;
-      ctx.font = `600 ${Math.round(fs * 0.72)}px ${ROUND}`;
-      ctx.fillText(fit(ctx, doing(a), tw), ax, ty);
-    }
+    ctx.font = `800 ${Math.round(fs * 0.78)}px ${ROUND}`;
+    ctx.fillText(fit(ctx, STATUS_LABELS[status] || status, tw), tx, y + Math.min(65, h * 0.55));
+    const update = latest(a, now);
+    ctx.fillStyle = status === 'waiting' ? '#fff1b3' : MUTED;
+    ctx.font = `600 ${Math.round(THREE.MathUtils.clamp(h * 0.105, 13, 22))}px ${ROUND}`;
+    const lines = h >= 160 ? wrap(ctx, update.text, tw, 2) : [fit(ctx, update.text, tw)];
+    lines.forEach((line, i) => ctx.fillText(line, tx, y + h - 17 - (lines.length - i - 1) * 25));
+    ctx.textAlign = 'right';
+    ctx.fillStyle = MUTED;
+    ctx.font = `600 15px ${ROUND}`;
+    ctx.fillText(update.age, x + w - 14, y + h - 5);
     ctx.textAlign = 'left';
     this.region(x, y, w, h, action);
   }
 }
 
-function doing(a) {
+function latest(a, now) {
   const s = a.session;
-  if (a.visualStatus === 'sleeping') return 'zzz…';
-  const last = s.activity.findLast((e) => e.kind !== 'think') || s.activity.at(-1);
-  return last ? `${last.icon || ''} ${last.text}`.trim() : s.title;
+  if (a.visualStatus === 'waiting') {
+    const { icon, text } = inboxLine(s);
+    return { text: `${icon} ${text}`, age: elapsed(s.statusSince, now) };
+  }
+  const activity = [...(s.activity || [])].reverse().find((e) => e.kind === 'say' || e.kind === 'tool');
+  const message = s.lastMessage;
+  const last = message?.ts > (activity?.ts || 0) ? { ...message, icon: '💬' } : activity;
+  return last ? { text: `${last.icon || '•'} ${last.text}`.trim(), age: elapsed(last.ts, now) } : { text: 'No update yet', age: '' };
+}
+
+function elapsed(ts, now) {
+  if (!ts) return '';
+  const minutes = Math.max(0, Math.floor((now - ts) / 60000));
+  if (!minutes) return 'now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
 function tint(hex, alpha) {

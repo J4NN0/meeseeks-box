@@ -6,7 +6,7 @@ import { DESK_H } from '../desk.js';
 
 // The meeting room's furniture: the long table, a notepad and a mug of
 // coffee at every place, the airpot and the spare mugs in the middle, the
-// bell that calls the meeting and the flip chart with the agenda. Floor
+// bell that calls the meeting. Floor
 // pieces have their origin on the floor in the middle and face +z;
 // table-top ones sit on y = 0.
 
@@ -174,49 +174,4 @@ export function createBell() {
       dome.scale.setScalar(1 + k * 0.08);
     },
   };
-}
-
-/** The flip chart on its easel, with today's agenda. */
-export function createFlipChart() {
-  const g = new THREE.Group();
-  const leg = (x, z, tilt, turn) => {
-    const l = box(0.035, 1.75, 0.035, '#8a6a48', 0, 0.875, 0);
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0, z);
-    pivot.rotation.set(tilt, 0, turn);
-    pivot.add(l);
-    g.add(pivot);
-  };
-  leg(-0.3, 0.05, -0.06, -0.08);
-  leg(0.3, 0.05, -0.06, 0.08);
-  leg(0, -0.42, 0.24, 0);
-  g.add(box(0.74, 0.04, 0.08, '#8a6a48', 0, 0.82, 0.08));
-  g.add(box(0.72, 0.94, 0.02, '#e9e4d6', 0, 1.3, 0.02));
-  const { canvas, ctx, texture } = canvasTexture(384, 500);
-  const draw = () => {
-    ctx.fillStyle = '#fbfaf4';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#c0392b';
-    ctx.font = '400 54px "Permanent Marker", "Marker Felt", cursive';
-    ctx.fillText('AGENDA', 34, 82);
-    ctx.fillStyle = '#2d2d2d';
-    ctx.font = '400 32px "Permanent Marker", "Marker Felt", cursive';
-    ['1. Status updates', '2. Who broke main?', '3. What is my', '    purpose?', '4. Ship it'].forEach((line, i) => ctx.fillText(line, 34, 160 + i * 58));
-    ctx.fillStyle = '#27ae60';
-    ctx.font = '400 30px "Permanent Marker", "Marker Felt", cursive';
-    ctx.fillText('wubba lubba dub dub!', 34, 470);
-    texture.needsUpdate = true;
-  };
-  draw();
-  // The marker font may still be on its way: draw it again once it's in.
-  document.fonts?.ready.then(draw);
-  const sheet = mesh(new THREE.PlaneGeometry(0.68, 0.88), new THREE.MeshBasicMaterial({ map: texture }), { cast: false });
-  sheet.position.set(0, 1.3, 0.031);
-  g.add(sheet);
-  // The pages already flipped over, rolled at the top.
-  const roll = cyl(0.03, 0.03, 0.74, '#e9e4d6', 12);
-  roll.rotation.z = Math.PI / 2;
-  roll.position.set(0, 1.79, 0.01);
-  g.add(roll);
-  return g;
 }

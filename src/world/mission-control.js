@@ -18,6 +18,8 @@ const PROVIDERS = [
 
 /** What an agent waiting on you wants: a question, a permission, or its reply. */
 export function inboxLine(session) {
+  const permission = session.talk?.permission;
+  if (permission) return { icon: '🔐', text: permission.description || `Wants to use ${permission.tool}` };
   const ask = session.ask;
   if (ask?.kind === 'question') return { icon: '🙋', text: ask.text };
   if (ask?.kind === 'plan') return { icon: '🗺️', text: ask.text };
