@@ -30,6 +30,8 @@ A local server reads Claude Code and Codex session files and serves their activi
 - [ ] Interdimensional cable
 - [ ] Arcade game
 - [ ] Kitchen / common area
+- [ ] Portal
+- [ ] Meeseeks wardarobe
 
 ## License
 
