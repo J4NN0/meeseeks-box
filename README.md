@@ -27,9 +27,9 @@ A local server reads Claude Code and Codex session files and serves their activi
 
 ## Roadmap
 
-[ ] Interdimensional cable
-[ ] Arcade game
-[ ] Kitchen / common area
+- [ ] Interdimensional cable
+- [ ] Arcade game
+- [ ] Kitchen / common area
 
 ## License
 
