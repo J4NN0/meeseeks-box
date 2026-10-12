@@ -8,7 +8,7 @@ import { fit, roundRect } from '../screens.js';
 // During a meeting, agents in the other universes (the garage, or the
 // Microverse and deeper in the car battery) join on floating TVs at the head
 // of the table: one per universe, a tile per agent with its face, project
-// and status. Click a tile to go and see that agent where it is.
+// and status. Click a tile to open that agent's chat here in the room.
 
 const ROUND = 'ui-rounded, "SF Pro Rounded", system-ui, sans-serif';
 const INK = '#171311';
@@ -77,7 +77,7 @@ class CallBoard extends Board {
     const s = a.session;
     const name = s.project || s.title;
     const status = a.visualStatus;
-    const action = { id: `call:${a.id}`, kind: 'agent', agentId: a.id, label: `${name} · ${STATUS_LABELS[status] || status}\nin the ${where} · click to go there` };
+    const action = { id: `call:${a.id}`, kind: 'call-agent', agentId: a.id, label: `${name} · ${STATUS_LABELS[status] || status}\nin the ${where} · click to open chat` };
     const hot = this.isHovered(action);
     ctx.fillStyle = tint(a.colorHex, hot ? 0.32 : 0.16);
     roundRect(ctx, x, y, w, h, 18);

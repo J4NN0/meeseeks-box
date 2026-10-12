@@ -272,6 +272,8 @@ function openProject(key, focus) {
 function act(action) {
   if (action.kind === 'agent') {
     goToAgent(action.agentId);
+  } else if (action.kind === 'call-agent') {
+    openCallAgent(action.agentId);
   } else if (action.kind === 'project') {
     openProject(action.key, action.focus);
   } else if (action.kind === 'limits') {
@@ -303,6 +305,25 @@ function act(action) {
     here().world.room.coffeeBar.use(action.part, action.index);
   } else if (action.kind === 'box') {
     summon();
+  }
+}
+
+/** Opens a meeting screen's agent chat without leaving this universe. */
+function openCallAgent(id) {
+  if (traveling) return;
+  const record = multiverse.find(id);
+  if (!record) return hud.toast('✨ That agent already finished and vanished.');
+  focused = null;
+  hud.showPanel(record, { tab: 'chat' });
+  if (view === 'walk') {
+    walker.unlock();
+    syncWalkHud();
+  } else if (focusedBoard) {
+    const face = faceOf(focusedBoard);
+    if (face) {
+      const { eye, look } = boardView(face, true);
+      flyTo(eye, look, { duration: 0.6 });
+    }
   }
 }
 
@@ -944,6 +965,8 @@ renderer.setAnimationLoop((timestamp) => {
     hud.toast(record ? `🔋 That agent moved to the ${verse(record.level).name}.` : '✨ That agent finished and vanished.');
     unfocus();
   }
+
+  if (hud.selected?.level !== undefined && !multiverse.find(hud.selected.id)) closePanel();
 
   slowTimer -= dt;
   if (slowTimer <= 0) {

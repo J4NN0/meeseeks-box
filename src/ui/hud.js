@@ -141,7 +141,7 @@ export class Hud {
     if (type === 'waiting') this.toast(`🙋 ${who} is waiting on you`, agent.colorHex);
   }
 
-  showPanel(agent) {
+  showPanel(agent, { tab = this.tab } = {}) {
     this.selected = agent;
     this.project = null;
     this.panelKey = '';
@@ -160,7 +160,7 @@ export class Hud {
     for (const btn of this.panelBody.querySelectorAll('[role=tab]')) btn.addEventListener('click', () => this.setTab(btn.dataset.tab));
     this.talk.mount(this.panelBody.querySelector('.tab.chat'), agent);
     // Just out of the box, it wants to know what it's for.
-    this.setTab(agent.awaiting ? 'chat' : this.tab);
+    this.setTab(agent.awaiting || agent.session.box?.state === 'new' ? 'chat' : tab);
     if (agent.awaiting) requestAnimationFrame(() => this.talk.focus());
     this.renderPanel(Date.now());
   }
