@@ -55,6 +55,19 @@ const _basis = new THREE.Matrix4();
 const _euler = new THREE.Euler();
 const ACCESSORIES = ['none', 'headphones', 'beanie', 'cap', 'glasses', 'none', 'headphones', 'tie'];
 
+// A soft, tapered limb whose ends tuck into the neighbouring joints. The
+// original equal-width capsules made each moving part read as a separate rod.
+function shapedLimb(length, radii, material) {
+  const [top, upper, middle, lower, end] = radii;
+  const profile = [
+    [0, 0.025], [top * 0.8, 0.022], [top, -0.025],
+    [upper, -length * 0.23], [middle, -length * 0.52],
+    [lower, -length * 0.78], [end, -length + 0.012],
+    [end * 0.8, -length - 0.018], [0, -length - 0.025],
+  ].reverse().map(([radius, y]) => new THREE.Vector2(radius, y));
+  return mesh(new THREE.LatheGeometry(profile, 16), material);
+}
+
 /**
  * How a hand turns about its forearm: not at all with the arm down, half a
  * turn once it's up overhead, so the palm faces front and the thumb points
@@ -82,19 +95,22 @@ export class Meeseeks extends CharacterBase {
 
     // Hips and legs ----------------------------------------------------------
     const hips = joint(this.root, 0, HIP_STAND, 0);
-    const pelvis = mesh(new THREE.SphereGeometry(0.13, 16, 12), skin);
-    pelvis.scale.set(1, 0.7, 0.85);
+    const pelvis = mesh(new THREE.SphereGeometry(0.14, 20, 16), skin);
+    pelvis.scale.set(1, 0.8, 0.88);
     hips.add(pelvis);
     this.hips = hips;
 
     this.legs = [-1, 1].map((s) => {
-      const hip = joint(hips, s * 0.075, -0.02, 0);
-      hip.add(limb(0.42, 0.045, skin));
+      const hip = joint(hips, s * 0.078, -0.02, 0);
+      hip.add(shapedLimb(0.42, [0.072, 0.076, 0.061, 0.046, 0.045], skin));
       const knee = joint(hip, 0, -0.42, 0);
-      knee.add(limb(0.38, 0.04, skin));
-      const foot = mesh(new THREE.SphereGeometry(0.06, 14, 10), skin);
-      foot.scale.set(0.85, 0.5, 1.6);
-      foot.position.set(0, -0.39, 0.05);
+      const kneecap = mesh(new THREE.SphereGeometry(0.048, 14, 12), skin);
+      kneecap.scale.set(1, 0.9, 0.92);
+      knee.add(kneecap);
+      knee.add(shapedLimb(0.38, [0.047, 0.058, 0.047, 0.032, 0.031], skin));
+      const foot = mesh(new THREE.SphereGeometry(0.065, 18, 12), skin);
+      foot.scale.set(0.9, 0.52, 1.75);
+      foot.position.set(0, -0.39, 0.065);
       knee.add(foot);
       return { hip, knee, s };
     });
@@ -105,11 +121,21 @@ export class Meeseeks extends CharacterBase {
     const chest = joint(this.jolt);
     this.chest = chest;
     const profile = [
-      [0, 0], [0.12, 0.01], [0.135, 0.08], [0.13, 0.2], [0.145, 0.33], [0.155, 0.42], [0.135, 0.5], [0.1, 0.56], [0, 0.6],
+      [0, -0.035], [0.11, -0.025], [0.125, 0.025],
+      [0.105, 0.12], [0.102, 0.2], [0.135, 0.29],
+      [0.174, 0.38], [0.175, 0.43], [0.145, 0.49],
+      [0.095, 0.535], [0.067, 0.58], [0, 0.59],
     ].map(([x, y]) => new THREE.Vector2(x, y));
-    const torso = mesh(new THREE.LatheGeometry(profile, 24), skin);
-    torso.scale.z = 0.82;
+    const torso = mesh(new THREE.LatheGeometry(profile, 32), skin);
+    torso.scale.z = 0.88;
     chest.add(torso);
+
+    // The narrow neck overlaps the chest and skull, leaving a single flowing
+    // line from the shoulders into the head even as the head turns.
+    const neck = mesh(new THREE.SphereGeometry(0.077, 16, 12), skin);
+    neck.scale.set(0.9, 1.45, 0.87);
+    neck.position.y = 0.52;
+    chest.add(neck);
 
     // Head -----------------------------------------------------------------
     this.headJolt = joint(chest, 0, 0.5, 0);
@@ -196,9 +222,14 @@ export class Meeseeks extends CharacterBase {
     // Arms -----------------------------------------------------------------
     this.arms = [-1, 1].map((s) => {
       const shoulder = joint(chest, s * SHOULDER.x, SHOULDER.y, 0);
-      shoulder.add(limb(UPPER_ARM, 0.034, skin));
+      const shoulderCap = mesh(new THREE.SphereGeometry(0.061, 16, 12), skin);
+      shoulderCap.scale.set(0.95, 1.05, 0.88);
+      shoulder.add(shoulderCap);
+      shoulder.add(shapedLimb(UPPER_ARM, [0.058, 0.057, 0.045, 0.034, 0.034], skin));
       const elbow = joint(shoulder, 0, -UPPER_ARM, 0);
-      elbow.add(limb(FOREARM - 0.01, 0.031, skin)); // stops short of the wrist
+      const elbowCap = mesh(new THREE.SphereGeometry(0.035, 14, 10), skin);
+      elbow.add(elbowCap);
+      elbow.add(shapedLimb(FOREARM - 0.01, [0.035, 0.042, 0.039, 0.027, 0.026], skin));
       const hand = joint(elbow, 0, -FOREARM, 0);
       const palm = mesh(new THREE.SphereGeometry(0.052, 14, 10), skin);
       palm.scale.set(0.85, 1.15, 0.6);
