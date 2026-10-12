@@ -161,6 +161,11 @@ export class Talk {
     const s = this.agent.session;
     const key = `${s.id}:${s.lastActivityAt}:${s.activity.length}:${s.activity.at(-1)?.ts}`;
     if (this.fetching || (key === this.fetchedFor && now - this.fetchedAt < REFETCH_MS)) return;
+    // A simulated agent (data/simulator.js) has no transcript to read.
+    if (s.sim) {
+      this.fetchedFor = key;
+      return;
+    }
     this.fetching = true;
     this.fetchedAt = now;
     const id = s.id;
@@ -258,6 +263,10 @@ export class Talk {
     this.form.hidden = !canTalk || asking;
     this.connectEl.hidden = canTalk || asking;
     if (canTalk || asking) return;
+    if (s.sim) {
+      this.connectEl.innerHTML = '<p>A simulated agent: there’s no session to talk to.</p>';
+      return;
+    }
     if (s.provider !== 'claude') {
       this.connectEl.innerHTML = '<p>Talking to it from here works with Claude Code sessions only.</p>';
       return;
@@ -303,7 +312,7 @@ export class Talk {
 
   async decide(requestId, behavior) {
     const s = this.agent?.session;
-    if (!s || !requestId) return;
+    if (!s || s.sim || !requestId) return;
     for (const b of this.waitEl.querySelectorAll('button')) b.disabled = true;
     try {
       await post('/api/permission', { id: s.id, requestId, behavior });

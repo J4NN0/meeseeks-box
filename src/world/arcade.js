@@ -6,13 +6,8 @@ import { canvasTexture, glowTexture } from './screens.js';
 // Blips and Chitz. An upright cabinet built round its side profile: a base
 // with the coin door, the control panel jutting out (a joystick, six
 // buttons, the 1P and 2P starts), the screen tipped back in its bezel with
-// the speakers above, and the backlit marquee under the top.
-//
-// It isn't playable yet, but it's wired for it: `press()` and `tilt()`
-// move the controls, and `setGame()` hands the screen to a game, whose
-// `draw(ctx, t, dt)` paints it instead of the attract loop. Every part is
-// tagged `userData.arcade` ('cabinet', 'screen', 'stick' or 'button', with
-// `arcadeButton` for which one).
+// the speakers above, and the backlit marquee under the top. Not playable:
+// the screen runs the attract loop.
 //
 // Built facing +z, its back at z = BACK: turn the group to put it against a wall.
 
@@ -50,17 +45,10 @@ const STARTS = [
   { name: 'start1', at: [-0.04, -0.1] },
   { name: 'start2', at: [0.03, -0.1] },
 ];
-const STICK = { at: [-0.17, 0.0], lean: 0.32 };
-/** How far a button goes in, and how quickly the controls follow. */
-const TRAVEL = 0.006;
-const SPRING = 30;
+const STICK = [-0.17, 0.0];
 
 export function createArcade() {
   const group = new THREE.Group();
-  const tag = (obj, part, extra) => {
-    obj.traverse((o) => Object.assign(o.userData, { arcade: part, ...extra }));
-    return obj;
-  };
 
   // Cabinet ---------------------------------------------------------------
   const cabinet = new THREE.Group();
@@ -100,32 +88,26 @@ export function createArcade() {
   group.add(deck);
 
   const stick = new THREE.Group();
-  stick.position.set(STICK.at[0], 0, STICK.at[1]);
+  stick.position.set(STICK[0], 0, STICK[1]);
   stick.add(cyl(0.034, 0.034, 0.005, COLORS.metal, 24).translateY(0.0025));
-  const pivot = new THREE.Group();
-  pivot.add(cyl(0.022, 0.022, 0.004, '#d9534f', 20).translateY(0.007));
-  pivot.add(cyl(0.006, 0.006, 0.065, COLORS.metal, 10).translateY(0.04));
-  pivot.add(sphere(0.022, '#d9534f', 18).translateY(0.08));
-  stick.add(pivot);
-  deck.add(tag(stick, 'stick'));
+  stick.add(cyl(0.022, 0.022, 0.004, '#d9534f', 20).translateY(0.007));
+  stick.add(cyl(0.006, 0.006, 0.065, COLORS.metal, 10).translateY(0.04));
+  stick.add(sphere(0.022, '#d9534f', 18).translateY(0.08));
+  deck.add(stick);
 
-  const buttons = {};
   for (const b of [...BUTTONS, ...STARTS]) {
     const start = !b.color;
     const r = start ? 0.012 : 0.017;
     const button = new THREE.Group();
     button.position.set(b.at[0], 0, b.at[1]);
     button.add(cyl(r + 0.004, r + 0.004, 0.006, COLORS.black, 20).translateY(0.003));
-    const cap = new THREE.Group();
     const material = start ? glow('#fff1b8') : toon(b.color);
-    cap.add(cyl(r, r, 0.012, material, 20).translateY(0.008));
+    button.add(cyl(r, r, 0.012, material, 20).translateY(0.008));
     const dome = mesh(new THREE.SphereGeometry(r, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2), material);
     dome.position.y = 0.014;
     dome.scale.y = 0.3;
-    cap.add(dome);
-    button.add(cap);
-    deck.add(tag(button, 'button', { arcadeButton: b.name }));
-    buttons[b.name] = { cap, down: false, depth: 0 };
+    button.add(dome);
+    deck.add(button);
   }
 
   // Screen ----------------------------------------------------------------
@@ -142,7 +124,7 @@ export function createArcade() {
   const screen = canvasTexture(...SCREEN.px);
   const glass = mesh(new THREE.PlaneGeometry(SCREEN.w, SCREEN.h), new THREE.MeshBasicMaterial({ map: screen.texture, toneMapped: false }), { cast: false });
   glass.position.set(0, sy, 0.003);
-  bezel.add(tag(glass, 'screen'));
+  bezel.add(glass);
   // Speakers above the screen, and the maker's plate between them.
   for (const s of [-1, 1]) bezel.add(speaker(s * 0.18, 0.205));
   bezel.add(box(0.12, 0.03, 0.006, COLORS.trim, 0, 0.205, 0.003, { cast: false }));
@@ -160,52 +142,20 @@ export function createArcade() {
   const slots = new THREE.MeshBasicMaterial({ color: COLORS.slot, toneMapped: false });
   cabinet.traverse((o) => { if (o.userData.coinSlot) o.material = slots; });
 
-  group.traverse((o) => { o.userData.arcade ??= 'cabinet'; });
-
   // ------------------------------------------------------------------------
-  let game = null;
   let frame = 0;
-  const stickAim = { x: 0, y: 0 };
 
   function update(dt, t) {
-    for (const b of Object.values(buttons)) {
-      b.depth += ((b.down ? TRAVEL : 0) - b.depth) * Math.min(1, dt * SPRING);
-      b.cap.position.y = -b.depth;
-    }
-    pivot.rotation.x += (stickAim.y * STICK.lean - pivot.rotation.x) * Math.min(1, dt * SPRING);
-    pivot.rotation.z += (-stickAim.x * STICK.lean - pivot.rotation.z) * Math.min(1, dt * SPRING);
-    slots.color.set(COLORS.slot).multiplyScalar(game || Math.sin(t * 5) > 0 ? 1 : 0.35);
-
+    slots.color.set(COLORS.slot).multiplyScalar(Math.sin(t * 5) > 0 ? 1 : 0.35);
     frame += dt;
     if (frame < 1 / SCREEN.fps) return;
-    const step = frame;
     frame = 0;
-    if (game) game.draw(screen.ctx, t, step);
-    else attract(screen.ctx, t);
-    scanlines(screen.ctx);
+    attract(screen.ctx, t);
+    screen.ctx.drawImage(scanlines(), 0, 0);
     screen.texture.needsUpdate = true;
   }
 
-  return {
-    group,
-    update,
-    screen: { canvas: screen.canvas, ctx: screen.ctx, texture: screen.texture },
-    buttons: Object.keys(buttons),
-    /** Push a button in (`down`) or let it spring back. */
-    press(name, down = true) {
-      if (buttons[name]) buttons[name].down = down;
-    },
-    /** Lean the joystick: x left to right, y back to front, -1 to 1 (0, 0 to let go). */
-    tilt(x, y) {
-      stickAim.x = THREE.MathUtils.clamp(x, -1, 1);
-      stickAim.y = THREE.MathUtils.clamp(y, -1, 1);
-    },
-    /** Hand the screen to a game ({ draw(ctx, t, dt) }), or back to the attract loop with null. */
-    setGame(next) {
-      game = next;
-      frame = 1 / SCREEN.fps;
-    },
-  };
+  return { group, update };
 }
 
 // --------------------------------------------------------------- building
@@ -242,17 +192,21 @@ function molding(x) {
   PROFILE.forEach(([z, y], i) => {
     const [nz, ny] = PROFILE[(i + 1) % PROFILE.length];
     if (y === 0 && ny === 0) return;
-    g.add(along([z, y], [nz, ny], mesh(rodGeometry(r), toon(COLORS.trim))));
+    g.add(along([z, y], [nz, ny], mesh(rodGeometry(), toon(COLORS.trim))));
     if (y > 0) g.add(sphere(r, COLORS.trim, 10).translateZ(z).translateY(y));
   });
   g.position.x = x;
   return g;
 }
 
+// Built once and shared by every office's arcade, so disposing one leaves it be.
 let rod;
-/** A unit rod along z, for along() to stretch. */
-function rodGeometry(r) {
-  return (rod ??= new THREE.CylinderGeometry(r, r, 1, 8).rotateX(Math.PI / 2));
+/** A unit rod along z, the molding's radius, for along() to stretch. */
+function rodGeometry() {
+  if (rod) return rod;
+  rod = new THREE.CylinderGeometry(0.021, 0.021, 1, 8).rotateX(Math.PI / 2);
+  rod.userData.shared = true;
+  return rod;
 }
 
 function coinDoor() {
@@ -293,11 +247,13 @@ function sideArt(s) {
 }
 
 // ---------------------------------------------------------------- artwork
+// Painted once and shared by every office's arcade, so disposing one leaves them be.
 
 let sideMap;
 function sideTexture() {
   if (sideMap) return sideMap;
   const { canvas, ctx, texture } = canvasTexture(350, 410);
+  texture.userData.shared = true;
   const { width: w, height: h } = canvas;
   ctx.fillStyle = '#ff5fa2';
   ctx.beginPath();
@@ -336,6 +292,7 @@ let marqueeMap;
 function marqueeTexture() {
   if (marqueeMap) return marqueeMap;
   const { canvas, ctx, texture } = canvasTexture(640, 200);
+  texture.userData.shared = true;
   const { width: w, height: h } = canvas;
   const draw = () => {
     const bg = ctx.createLinearGradient(0, 0, 0, h);
@@ -462,9 +419,14 @@ function attract(ctx, t) {
   ctx.fillText('© BLIPS AND CHITZ', w / 2, h - 16);
 }
 
-/** CRT scanlines and a dark rim, over whatever's on the screen. */
-function scanlines(ctx) {
-  const { width: w, height: h } = ctx.canvas;
+let overlay;
+/** CRT scanlines and a dark rim, drawn once, to lay over whatever's on the screen. */
+function scanlines() {
+  if (overlay) return overlay;
+  overlay = document.createElement('canvas');
+  [overlay.width, overlay.height] = SCREEN.px;
+  const ctx = overlay.getContext('2d');
+  const { width: w, height: h } = overlay;
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
   for (let y = 0; y < h; y += 3) ctx.fillRect(0, y, w, 1);
   const rim = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, w * 0.62);
@@ -472,4 +434,5 @@ function scanlines(ctx) {
   rim.addColorStop(1, 'rgba(0,0,0,0.55)');
   ctx.fillStyle = rim;
   ctx.fillRect(0, 0, w, h);
+  return overlay;
 }

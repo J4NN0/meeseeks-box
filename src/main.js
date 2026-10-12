@@ -17,6 +17,7 @@ import { MissionControl } from './world/mission-control.js';
 import { RecapBoard } from './world/recap-board.js';
 import { post } from './data/api.js';
 import { Feed } from './data/feed.js';
+import { SimFeed, simCount } from './data/simulator.js';
 import { TodayFeed } from './data/today.js';
 import { Hud } from './ui/hud.js';
 import { esc } from './ui/util.js';
@@ -73,7 +74,15 @@ controls.update();
 // The wall boards are shared by the garage and every universe in its battery.
 const dashboard = new MissionControl();
 const whiteboard = new RecapBoard();
-const feed = new Feed();
+// `?sim` in dev: pretend sessions, to try the office full (data/simulator.js).
+const sim = import.meta.env.DEV ? simCount() : null;
+const feed = sim === null ? new Feed() : new SimFeed(sim, {
+  // The nappers in the office you're in go for a coffee, as many as there's room for.
+  coffee() {
+    const { manager } = here();
+    for (const agent of manager.agents.values()) manager.coffee.send(agent);
+  },
+});
 const today = new TodayFeed();
 dashboard.setProvider(store.get('limits', 'claude'));
 setChristmasLights(store.get('lights', 'on') === 'on');
@@ -316,7 +325,9 @@ async function summon() {
   if (traveling) return;
   here().world.box.press();
   try {
-    const { id } = await post('/api/box/new');
+    // Simulating, it's one more pretend agent: no real session.
+    const { id } = sim === null ? await post('/api/box/new') : { id: feed.add() };
+    if (!id) return;
     summoned = { id, at: performance.now() };
     feed.poll();
   } catch (e) {

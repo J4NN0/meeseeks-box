@@ -221,7 +221,7 @@ export class Hud {
     }
 
     // A Meeseeks from the box that hasn't been given anything has no conversation yet.
-    const resume = s.box?.state === 'new' ? '' : s.provider === 'claude' ? `cd ${shellQuote(s.cwd)} && claude --resume ${rawId}` : s.provider === 'codex' ? `codex resume ${rawId}` : '';
+    const resume = s.box?.state === 'new' || s.sim ? '' : s.provider === 'claude' ? `cd ${shellQuote(s.cwd)} && claude --resume ${rawId}` : s.provider === 'codex' ? `codex resume ${rawId}` : '';
     const rows = [
       ['Project', s.project],
       ['Directory', s.cwd],

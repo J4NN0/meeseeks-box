@@ -15,6 +15,10 @@ npm run dev
 
 For a production build, use `npm run serve`.
 
+### Simulating agents
+
+To try the office with lots of agents without running any, open the dev server with `?sim` (16 pretend agents), or `?sim=N` to start with N (0 to 48), e.g. `http://127.0.0.1:5199/?sim=30`. A panel in the corner adds and removes agents, sets them all working, waiting, napping or stressed (or a mix), sends the nappers for a coffee, and with **Live changes** has them come, go and switch status on their own. The box adds a pretend agent too. Nothing reaches your real sessions, and it only works in `npm run dev`.
+
 ## What you'll see
 
 - **Typing**: the session is working.
