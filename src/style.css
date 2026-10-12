@@ -654,7 +654,7 @@ body[data-verse='3'] #stars { filter: hue-rotate(240deg); }
   .controls { justify-content: flex-start; }
 }
 
-/* ------------------------------------------- the simulator (?sim, dev only) */
+/* -------------------------- the simulator (?debug=true&sim, dev only) */
 
 .sim {
   position: fixed; z-index: 15;

@@ -1,10 +1,12 @@
 // A pretend session feed, to try the office with more agents than you have
-// running: open the dev server with `?sim` (or `?sim=20` to start with 20,
-// `?sim=0` with none).
+// running: open the dev server with `?debug=true&sim` (or `&sim=20` to start
+// with 20, `&sim=0` with none).
 // It stands in for Feed (data/feed.js) and adds a small panel to add and
 // remove agents, set what they're doing, and send the nappers for a coffee.
 // The box adds one too, instead of starting a real session.
 // Dev only: main.js never builds it in production.
+
+import { debugParams } from '../debug.js';
 
 const TICK_MS = 2000;
 const MAX = 48;
@@ -25,10 +27,9 @@ const STATUSES = ['working', 'stressed', 'waiting', 'sleeping'];
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 export function simCount() {
-  const params = new URLSearchParams(location.search);
-  if (!params.has('sim')) return null;
-  const n = Number(params.get('sim'));
-  return params.get('sim') !== '' && Number.isFinite(n) && n >= 0 ? Math.min(MAX, Math.round(n)) : 16;
+  if (!debugParams.has('sim')) return null;
+  const n = Number(debugParams.get('sim'));
+  return debugParams.get('sim') !== '' && Number.isFinite(n) && n >= 0 ? Math.min(MAX, Math.round(n)) : 16;
 }
 
 export class SimFeed {
@@ -42,7 +43,7 @@ export class SimFeed {
     this.live = false;
     this.coffee = coffee;
     for (let i = 0; i < count; i++) this.add(pick(['working', 'working', 'waiting', 'sleeping']));
-    this.panel = this.buildPanel();
+    this.panel = debugParams.get('hideSim') === 'true' ? null : this.buildPanel();
   }
 
   onChange(fn) { this.listeners.add(fn); }

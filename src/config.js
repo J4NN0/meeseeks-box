@@ -1,6 +1,6 @@
-// Settings from the URL query string (see "Knobs" in the README).
+// Debug settings from the URL query string.
 
-const params = new URLSearchParams(location.search);
+import { debugParams as params } from './debug.js';
 
 function minutes(name, fallback) {
   const n = Number(params.get(name));

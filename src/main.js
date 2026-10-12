@@ -76,7 +76,7 @@ controls.update();
 // The wall boards are shared by the garage and every universe in its battery.
 const dashboard = new MissionControl();
 const whiteboard = new RecapBoard();
-// `?sim` in dev: pretend sessions, to try the office full (data/simulator.js).
+// `?debug=true&sim` in dev: pretend sessions, to try the office full.
 const sim = import.meta.env.DEV ? simCount() : null;
 const feed = sim === null ? new Feed() : new SimFeed(sim, {
   // The nappers in the office you're in go for a coffee, as many as there's room for.

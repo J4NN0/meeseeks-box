@@ -3,13 +3,15 @@ import { apiMiddleware } from './server/api.js';
 import { keyLink } from './server/key.js';
 import { stopAll } from './server/meeseeks.js';
 
-/** Under Vite's own URLs, the link that hands a browser the box's key, for one the box can't hand it to itself. */
-function printKeyLink(server) {
+/** Print links under Vite's actual local URL, including any fallback port. */
+function printLinks(server, { debugSample = false } = {}) {
   const printUrls = server.printUrls;
   server.printUrls = () => {
     printUrls.call(server);
     const url = server.resolvedUrls?.local[0];
-    if (url) server.config.logger.info(`  ➜  Key:     ${keyLink(url)} (only if a browser can’t summon Meeseeks)`);
+    if (!url) return;
+    if (debugSample) server.config.logger.info(`  ➜  Debug:   ${new URL('?debug=true&sim=1&hideSim=false', url)}`);
+    server.config.logger.info(`  ➜  Key:     ${keyLink(url)} (only if a browser can’t summon Meeseeks)`);
   };
 }
 
@@ -21,12 +23,12 @@ const meeseeksApi = {
   name: 'meeseeks-api',
   configureServer(server) {
     server.middlewares.use(apiMiddleware());
-    printKeyLink(server);
+    printLinks(server, { debugSample: true });
     server.httpServer?.once('close', stopAll);
   },
   configurePreviewServer(server) {
     server.middlewares.use(apiMiddleware());
-    printKeyLink(server);
+    printLinks(server);
     server.httpServer.once('close', stopAll);
   },
 };
