@@ -2,6 +2,14 @@
 
 A cartoon 3D office for your Claude Code and Codex sessions. Running agents appear at desks, with their activity and status reflected in the scene. Click one to inspect its conversation and resume command. You can also summon a Claude Code agent from the box, choose a project folder, and give it a task.
 
+![Overview of the Meeseeks Box office](docs/images/overview.png)
+
+## Screenshots
+
+| Walk around the office | Join a meeting | Inspect a session |
+| --- | --- | --- |
+| ![Meeseeks working at their desks](docs/images/office.png) | ![Meeseeks around the meeting table](docs/images/meeting.png) | ![Agent session activity panel](docs/images/session.png) |
+
 ## Run it
 
 Requires Node.js 20.19+ (or 22.12+) on macOS or Linux.
