@@ -64,6 +64,7 @@ export function createPortal(radius = 1) {
 
   return {
     group,
+    disc,
     update(t) {
       uniforms.time.value = t;
       disc.scale.setScalar(1 + Math.sin(t * 3) * 0.015);

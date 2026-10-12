@@ -132,6 +132,11 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
   if (theme.level > 0) {
     portal.group.traverse((o) => { if (o.isMesh) o.userData.portal = true; });
     room.add(exitSign(PORTAL.x + 0.03, PORTAL.y + PORTAL.radius + 0.42, PORTAL.z, verse(theme.level - 1).name));
+  } else {
+    portal.disc.userData.portalBlocked = true;
+    const barrier = portalBarricade(PORTAL.radius);
+    portal.group.add(barrier);
+    solidBox(PORTAL.x + 0.42, PORTAL.z, 0.2, PORTAL.radius * 1.9);
   }
 
   room.add(poster(1.45, 2.35, -5.96, 'WUBBA LUBBA', 'DUB DUB SHIP IT', '#97ce4c', 0));
@@ -209,6 +214,44 @@ export function buildRoom(scene, { theme, dashboard, whiteboard }) {
 }
 
 // ------------------------------------------------------------------ props
+
+/** Crossed construction boards over the root portal, facing into the garage. */
+function portalBarricade(radius) {
+  const g = new THREE.Group();
+  for (const angle of [-0.72, 0.72]) {
+    const board = box(radius * 2.25, 0.19, 0.09, '#f2b941', 0, 0, 0.14);
+    board.rotation.z = angle;
+    g.add(board);
+    for (const side of [-1, 1]) {
+      const end = box(0.13, 0.2, 0.095, '#262522', side * radius * 0.93, 0, 0.14);
+      end.rotation.z = angle;
+      // The end caps follow the boards' local axes.
+      end.position.set(Math.cos(angle) * side * radius * 0.93, Math.sin(angle) * side * radius * 0.93, 0.14);
+      g.add(end);
+    }
+  }
+
+  const { ctx, texture } = canvasTexture(512, 144);
+  ctx.fillStyle = '#20231d';
+  ctx.fillRect(0, 0, 512, 144);
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = '#f2b941';
+  ctx.strokeRect(6, 6, 500, 132);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff4cf';
+  ctx.font = "800 49px Nunito, system-ui, sans-serif";
+  ctx.fillText('WORK IN PROGRESS', 256, 61);
+  ctx.fillStyle = '#f2b941';
+  ctx.font = "800 27px Nunito, system-ui, sans-serif";
+  ctx.fillText('PORTAL CLOSED', 256, 110);
+  g.add(box(radius * 1.93, 0.56, 0.055, '#20231d', 0, 0, 0.24));
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(radius * 1.87, 0.52), new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
+  face.position.z = 0.27;
+  g.add(noInk(face));
+  g.traverse((o) => { if (o.isMesh) o.userData.portalBlocked = true; });
+  return g;
+}
 
 function buildEnclosure(theme) {
   const g = new THREE.Group();

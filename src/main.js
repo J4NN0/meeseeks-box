@@ -111,8 +111,8 @@ const here = () => multiverse.active;
 const ink = new InkRenderer(renderer, here().scene, camera);
 ink.enabled = CONFIG.ink;
 
-// Every office has the same floor plan, so the garage's colliders fit all.
-const walker = new Walker(camera, renderer.domElement, { colliders: here().world.colliders, bounds: WALK_BOUNDS, portal: PORTAL });
+// The active office supplies its own colliders and portal entrance.
+const walker = new Walker(camera, renderer.domElement, { colliders: here().world.colliders, bounds: WALK_BOUNDS, portal: null });
 let view = 'orbit'; // orbit | walk
 
 const hud = new Hud({
@@ -287,6 +287,8 @@ function act(action) {
     enterGate(action.level);
   } else if (action.kind === 'portal') {
     climbOut({ via: 'portal' });
+  } else if (action.kind === 'portal-blocked') {
+    hud.toast('🚧 Portal under construction. Coming in a future release!');
   } else if (action.kind === 'hint') {
     if (multiverse.isOpen(action.level)) hud.toast(`🔋 Press the remote in the engine bay (or its tag) to go into the ${verse(action.level).name}.`);
     else hud.toast(emptyVerse(action.level));
@@ -530,12 +532,7 @@ walker.addEventListener('portal', () => {
   // Inside the battery, the portal is the way out, up a level.
   if (here().level > 0) {
     climbOut({ via: 'portal' });
-    return;
   }
-  // Wubba lubba dub dub: step through Rick's portal, come out by the car.
-  portalFlash();
-  walker.teleport(7.2, -1.2, new THREE.Vector3(-2, 1.3, 0.5));
-  hud.toast('🌀 Wubba lubba dub dub!');
 });
 walker.addEventListener('resuming', syncWalkHud);
 // A refused lock just leaves you paused; the next click tries again.
@@ -698,6 +695,8 @@ async function travel(level, via) {
   if (walking) from.world.room.setEnclosed(false);
   multiverse.enter(level, Date.now());
   const to = here();
+  walker.colliders = to.world.colliders;
+  walker.portal = level > 0 ? PORTAL : null;
   ink.scene = to.scene;
   camera.far = level ? BACKDROP_FAR : 200;
   camera.updateProjectionMatrix();
@@ -803,6 +802,7 @@ function pick(ndc, maxDistance = Infinity) {
       return { action: { id: 'gate-hint', kind: 'hint', level, label: `${name} · ${open ? `${n} agent${n === 1 ? '' : 's'}` : 'empty'}` } };
     }
     if (d.car) return { action: { id: 'car', kind: 'hood', label: 'Car' } };
+    if (d.portalBlocked) return { action: { id: 'portal-blocked', kind: 'portal-blocked', label: 'Portal closed · work in progress' } };
     if (d.portal) return { action: { id: 'portal', kind: 'portal', label: `Portal · ${verse(world.level - 1).name}` } };
     if (d.remote) return { action: { id: 'remote', kind: 'remote', label: `TV remote · channel ${world.room.living.channel}\nclick to change channel` } };
     if (d.livingTv) return { action: { id: 'tv', kind: 'tv', label: `TV · channel ${world.room.living.channel}` } };
