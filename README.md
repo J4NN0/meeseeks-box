@@ -25,6 +25,12 @@ Add `?sim` to the dev URL (e.g., `http://127.0.0.1:5199/?sim=10`) to see simulat
 
 A local server reads Claude Code and Codex session files and serves their activity to a three.js scene. The server listens on `127.0.0.1` by default because the activity can include conversation excerpts. Summoning agents and sending prompts or permission decisions can affect your project files through Claude Code.
 
+## Roadmap
+
+[ ] Interdimensional cable
+[ ] Arcade game
+[ ] Kitchen / common area
+
 ## License
 
 [GPL-3.0](LICENSE)
