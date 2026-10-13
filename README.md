@@ -11,7 +11,7 @@ A cartoon 3D office for your Claude Code and Codex sessions. Running agents appe
 - Press the box to summon a Claude Code agent, choose a project folder, and give it a task.
 - Walk around, call everyone to a meeting, and explore the other spaces.
 
-You can send prompts and answer permission requests in the office for Claude Code agents summoned from the box or started with `./bin/claude-box`. Other Claude Code and Codex sessions can be viewed in the office.
+You can send prompts and answer permission requests in the office for Claude Code agents summoned from the box or started with `claude-box` (see [Quick Start](#quick-start)). Other Claude Code and Codex sessions can be viewed in the office.
 
 ## The Virtual Office
 
@@ -38,13 +38,23 @@ You can send prompts and answer permission requests in the office for Claude Cod
 Requires Node.js 20.19+ (or 22.12+) on macOS or Linux.
 
 ```bash
+npx @j4nn0/meeseeks-box
+```
+
+The office opens in your browser and finds sessions in `~/.claude` and `~/.codex` automatically. Add `--no-open` to skip opening the browser, or set `PORT` to use a port other than 5199.
+
+To interact with a Claude Code session started outside the box, run `npx -p @j4nn0/meeseeks-box claude-box` instead of `claude`. It accepts the same arguments.
+
+### From source
+
+```bash
+git clone https://github.com/J4NN0/meeseeks-box.git
+cd meeseeks-box
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite (normally `http://127.0.0.1:5199`). The office finds sessions in `~/.claude` and `~/.codex` automatically.
-
-To interact with a Claude Code session started outside the box, run `./bin/claude-box` instead of `claude`. It accepts the same arguments. For a built version or simulation instructions, see [Development](docs/development.md).
+Open the local URL printed by Vite (normally `http://127.0.0.1:5199`). In a clone, run `./bin/claude-box` instead of `claude`. For a built version or simulation instructions, see [Development](docs/development.md).
 
 ## How it works
 
