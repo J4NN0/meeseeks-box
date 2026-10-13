@@ -14,12 +14,12 @@
     "rick-and-morty",
     "meeseeks"
   ],
-  "homepage": "https://github.com/J4NN0/meeseeks#readme",
-  "bugs": "https://github.com/J4NN0/meeseeks/issues",
+  "homepage": "https://github.com/J4NN0/meeseeks-box#readme",
+  "bugs": "https://github.com/J4NN0/meeseeks-box/issues",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/J4NN0/meeseeks.git"
+    "url": "git+https://github.com/J4NN0/meeseeks-box.git"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
