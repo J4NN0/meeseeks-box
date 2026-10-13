@@ -4,11 +4,11 @@ A cartoon 3D office for your Claude Code and Codex sessions. Running agents appe
 
 ![Overview of the Meeseeks Box office](docs/images/overview.png)
 
-## Screenshots
+## Take a tour
 
-| Walk around the office | Join a meeting | Inspect a session |
+| Walk around | Join a meeting | Inspect a session |
 | --- | --- | --- |
-| ![Meeseeks working at their desks](docs/images/office.png) | ![Meeseeks around the meeting table](docs/images/meeting.png) | ![Agent session activity panel](docs/images/session.png) |
+| [![Agents at work in the office](docs/images/office.png)](docs/images/office.png) | [![Agents around the meeting table](docs/images/meeting.png)](docs/images/meeting.png) | [![Agent session activity panel](docs/images/session.png)](docs/images/session.png) |
 
 ## Run it
 
