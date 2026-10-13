@@ -4,13 +4,27 @@ A cartoon 3D office for your Claude Code and Codex sessions. Running agents appe
 
 ![Overview of the Meeseeks Box office](docs/images/overview.png)
 
-## Take a tour
+## The Virtual Office
 
-| Walk around | Join a meeting | Inspect a session |
-| --- | --- | --- |
-| [![Agents at work in the office](docs/images/office.png)](docs/images/office.png) | [![Agents around the meeting table](docs/images/meeting.png)](docs/images/meeting.png) | [![Agent session activity panel](docs/images/session.png)](docs/images/session.png) |
+<table>
+  <tr>
+    <td><strong>Walk around</strong><br><a href="docs/images/office.png"><img src="docs/images/office.png" width="300" alt="Agents at work in the office"></a></td>
+    <td><strong>Join a meeting</strong><br><a href="docs/images/meeting.png"><img src="docs/images/meeting.png" width="300" alt="Agents around the meeting table"></a></td>
+    <td><strong>Inspect a session</strong><br><a href="docs/images/session.png"><img src="docs/images/session.png" width="300" alt="Agent session activity panel"></a></td>
+  </tr>
+  <tr>
+    <td><strong>Take the portal</strong><br><a href="docs/images/portal.png"><img src="docs/images/portal.png" width="300" alt="Green portal in the Miniverse"></a></td>
+    <td><strong>Explore the microverse</strong><br><a href="docs/images/car_multiverse.png"><img src="docs/images/car_multiverse.png" width="300" alt="Flying car parked in the Microverse office"></a></td>
+    <td><strong>Explore the collection</strong><br><a href="docs/images/collection.png"><img src="docs/images/collection.png" width="300" alt="Collection of objects on a wall and table"></a></td>
+  </tr>
+  <tr>
+    <td><strong>Enjoy drinks and fruits</strong><br><a href="docs/images/coffee.png"><img src="docs/images/coffee.png" width="300" alt="Coffee machine filling a red mug"></a></td>
+    <td><strong>Have a break</strong><br><a href="docs/images/drink.png"><img src="docs/images/drink.png" width="300" alt="Coffee mug overlooking agents at their desks"></a></td>
+    <td><strong>Visit the arcade</strong><br><a href="docs/images/roy_arcade_machine.png"><img src="docs/images/roy_arcade_machine.png" width="300" alt="Roy arcade machine beside the fridge"></a></td>
+  </tr>
+</table>
 
-## Run it
+## Quick Start
 
 Requires Node.js 20.19+ (or 22.12+) on macOS or Linux.
 
