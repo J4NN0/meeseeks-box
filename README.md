@@ -35,7 +35,7 @@ You can send prompts and answer permission requests in the office for Claude Cod
 
 ## Quick Start
 
-Requires Node.js 20.19+ (or 22.12+) on macOS or Linux.
+Requires Node.js 20.19+ (or 22.12+) on macOS or Linux. Run the [@j4nn0/meeseeks-box](https://www.npmjs.com/package/@j4nn0/meeseeks-box) npm package with `npx`:
 
 ```bash
 npx @j4nn0/meeseeks-box
