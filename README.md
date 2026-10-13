@@ -47,9 +47,16 @@ To interact with a Claude Code session started outside the box, run `npx -p @j4n
 
 ### From source
 
+Clone the repo:
+
 ```bash
 git clone https://github.com/J4NN0/meeseeks-box.git
 cd meeseeks-box
+```
+
+Install and run it:
+
+```bash
 npm install
 npm run dev
 ```
