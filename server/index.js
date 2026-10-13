@@ -53,7 +53,7 @@ async function serveStatic(req, res) {
   }
 }
 
-http
+export const server = http
   .createServer((req, res) => {
     if (!allowedHosts.has(req.headers.host)) { res.writeHead(403).end(); return; }
     api(req, res, () => serveStatic(req, res));

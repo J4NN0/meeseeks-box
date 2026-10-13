@@ -1,0 +1,45 @@
+# Publishes the package to npm when a GitHub release is published. The
+# release's tag must match package.json's version (v0.2.0 ↔ 0.2.0); a
+# pre-release goes out under the `next` tag, so `npx` keeps the stable one.
+#
+# Auth: trusted publishing (OIDC, no secret) once it's set up on npmjs.com;
+# until then, an npm token in the NPM_TOKEN secret.
+
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest
+
+      - name: Check the tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME doesn't match package.json version $version"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      # prepack builds dist/ before packing.
+      - run: npm publish --provenance ${{ github.event.release.prerelease && '--tag next' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
