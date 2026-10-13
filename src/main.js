@@ -76,9 +76,13 @@ controls.update();
 // The wall boards are shared by the garage and every universe in its battery.
 const dashboard = new MissionControl();
 const whiteboard = new RecapBoard();
+// The public demo (`npm run build:site`): pretend sessions, coming and going.
+const DEMO = import.meta.env.MODE === 'demo';
 // `?debug=true&sim` in dev: pretend sessions, to try the office full.
-const sim = import.meta.env.DEV ? simCount() : null;
+const sim = DEMO ? 12 : import.meta.env.DEV ? simCount() : null;
 const feed = sim === null ? new Feed() : new SimFeed(sim, {
+  panel: !DEMO,
+  live: DEMO,
   // The nappers in the office you're in go for a coffee, as many as there's room for.
   coffee() {
     const { manager } = here();
@@ -143,7 +147,8 @@ feed.onChange((sessions) => {
 });
 feed.start();
 today.onChange(() => whiteboard.draw(today.data, multiverse.roster(Date.now()), Date.now()));
-today.start();
+if (!DEMO) today.start();
+document.getElementById('demo-note').hidden = !DEMO;
 
 // Camera moves -----------------------------------------------------------------
 let flight = null;

@@ -38,8 +38,8 @@ function ensureKey() {
   return asking;
 }
 
-// Ready by the time you first press something.
-ensureKey();
+// Ready by the time you first press something. The demo has no server to ask.
+if (import.meta.env.MODE !== 'demo') ensureKey();
 
 /** Sends a request with the key; rejects with the server's error. */
 async function request(url, init = {}) {

@@ -42,6 +42,8 @@
     "build": "vite build",
     "start": "node server/index.js",
     "serve": "vite build && node server/index.js",
+    "build:site": "vite build --mode demo",
+    "preview:site": "vite build --mode demo && vite preview --mode demo",
     "prepack": "vite build",
     "release": "sh scripts/release.sh"
   },

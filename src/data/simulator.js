@@ -4,7 +4,8 @@
 // It stands in for Feed (data/feed.js) and adds a small panel to add and
 // remove agents, set what they're doing, and send the nappers for a coffee.
 // The box adds one too, instead of starting a real session.
-// Dev only: main.js never builds it in production.
+// Dev only, and the public demo (`npm run build:site`): main.js never builds
+// it into the real app.
 
 import { debugParams } from '../debug.js';
 
@@ -33,17 +34,17 @@ export function simCount() {
 }
 
 export class SimFeed {
-  constructor(count, { coffee } = {}) {
+  constructor(count, { coffee, panel = true, live = false } = {}) {
     /** Ours to change; listeners get copies, as a real poll hands over fresh ones. */
     this.list = [];
     this.sessions = [];
     this.state = 'live';
     this.listeners = new Set();
     this.next = 0;
-    this.live = false;
+    this.live = live;
     this.coffee = coffee;
     for (let i = 0; i < count; i++) this.add(pick(['working', 'working', 'waiting', 'sleeping']));
-    this.panel = debugParams.get('hideSim') === 'true' ? null : this.buildPanel();
+    this.panel = !panel || debugParams.get('hideSim') === 'true' ? null : this.buildPanel();
   }
 
   onChange(fn) { this.listeners.add(fn); }

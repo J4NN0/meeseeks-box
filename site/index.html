@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meeseeks Box</title>
+    <meta name="description" content="A cartoon 3D office for your Claude Code and Codex sessions. Run it with npx @j4nn0/meeseeks-box." />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body>
+    <div id="stars"></div>
+
+    <main class="landing">
+      <h1>Meeseeks Box</h1>
+      <p class="tagline">A 3D office for your AI agent sessions.</p>
+
+      <div class="command">
+        <code>npx @j4nn0/meeseeks-box</code>
+        <button id="copy" type="button">Copy</button>
+      </div>
+      <p class="note">Watch your running sessions appear as Meeseeks, with their activity and status reflected in the office. Interact with them, walk around, and explore the other spaces.</p>
+
+      <nav class="actions">
+        <a class="primary" href="./demo/">Try the demo</a>
+        <a href="https://github.com/J4NN0/meeseeks-box">GitHub</a>
+      </nav>
+    </main>
+
+    <div class="stage" id="stage">
+      <img src="../docs/images/overview.png" width="1712" height="1283" alt="Meeseeks at their desks in the office" />
+      <span class="hint">Drag to look around</span>
+    </div>
+
+    <script type="module" src="./site.js"></script>
+  </body>
+</html>

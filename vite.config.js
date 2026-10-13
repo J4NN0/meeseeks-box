@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import { apiMiddleware } from './server/api.js';
 import { keyLink } from './server/key.js';
@@ -33,10 +35,34 @@ const meeseeksApi = {
   },
 };
 
-export default defineConfig({
-  plugins: [meeseeksApi],
+// `npm run build:site`: the public site on GitHub Pages, into site-dist/. The
+// landing page (site/) at the root, and the office under demo/ with pretend
+// agents and no server (main.js checks the `demo` mode).
+let siteOut;
+const sitePages = {
+  name: 'site-pages',
+  configResolved(config) { siteOut = path.resolve(config.root, config.build.outDir); },
+  // Vite writes each page where it sits in the repo: move them into place.
+  closeBundle() {
+    const out = (file) => path.join(siteOut, file);
+    fs.mkdirSync(out('demo'), { recursive: true });
+    fs.renameSync(out('index.html'), out('demo/index.html'));
+    fs.renameSync(out('site/index.html'), out('index.html'));
+    fs.rmdirSync(out('site'));
+  },
+};
+
+export default defineConfig(({ mode }) => ({
+  plugins: [mode === 'demo' ? sitePages : meeseeksApi],
+  base: mode === 'demo' ? '/meeseeks-box/' : '/',
   server: { host: '127.0.0.1', port: 5199 },
   preview: { host: '127.0.0.1', port: 5199 },
-  // three.js alone is ~600 kB; one chunk is fine for a local dashboard.
-  build: { chunkSizeWarningLimit: 900 },
-});
+  build: {
+    // three.js alone is ~600 kB; one chunk is fine for a local dashboard.
+    chunkSizeWarningLimit: 900,
+    ...(mode === 'demo' && {
+      outDir: 'site-dist',
+      rollupOptions: { input: { site: 'site/index.html', demo: 'index.html' } },
+    }),
+  },
+}));
