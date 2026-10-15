@@ -2,8 +2,8 @@
 // server. GET /api/sessions, /api/today, /api/chat and /api/folders read; POST /api/talk and
 // /api/permission talk to a session through its channel (channel/client.js),
 // and POST /api/box/* make and run the box's own Meeseeks (meeseeks.js).
-// Writes, and listing your folders, need the box's key (key.js), which GET
-// /api/key hands to a browser running as you.
+// Every request but GET /api/key needs the box's key (key.js), which that
+// hands to a browser running as you.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,8 +74,6 @@ const thenRescan = (write) => async (body) => {
   return result;
 };
 
-const keyedReads = new Set(['/api/folders']);
-
 const writes = {
   // The box's own Meeseeks take what you say as their next instruction.
   '/api/talk': thenRescan((body) => (isBox(body.id) ? run({ id: body.id, text: body.text }) : talk(body))),
@@ -86,8 +84,9 @@ const writes = {
 };
 
 /**
- * Reads carry your transcripts, so only the box's own page may make them:
- * Vite's dev server would otherwise let any other localhost page read them.
+ * Only the box's own page may call the API. The key keeps out everyone else
+ * on this machine; this keeps out other pages in your own browser, which
+ * GET /api/key would otherwise hand it to.
  */
 function fromOurPage(req) {
   const origin = req.headers.origin;
@@ -95,12 +94,6 @@ function fromOurPage(req) {
   const site = req.headers['sec-fetch-site'];
   return !site || site === 'same-origin' || site === 'none';
 }
-
-/**
- * Writes reach your agents, so they also need a JSON body: a cross-site form
- * can't send one without asking first.
- */
-const jsonBody = (req) => /^application\/json\b/i.test(req.headers['content-type'] || '');
 
 const NO_KEY = 'This browser doesn’t have the box’s key: open the key link the server printed (in Vite, press u to show it again).';
 
@@ -138,14 +131,12 @@ export function apiMiddleware() {
     if (!read && !write) return next?.();
     try {
       if (!fromOurPage(req)) return reply(res, 403, { error: 'Only the box can do that.' });
+      if (url.pathname !== '/api/key' && !keyMatches(req.headers['x-meeseeks-key'])) return reply(res, 401, { error: NO_KEY });
       if (read) {
         if (req.method !== 'GET' && req.method !== 'HEAD') return reply(res, 405, { error: 'GET only.' });
-        if (keyedReads.has(url.pathname) && !keyMatches(req.headers['x-meeseeks-key'])) return reply(res, 401, { error: NO_KEY });
         return reply(res, 200, await read(url, req));
       }
       if (req.method !== 'POST') return reply(res, 405, { error: 'POST only.' });
-      if (!keyMatches(req.headers['x-meeseeks-key'])) return reply(res, 401, { error: NO_KEY });
-      if (!jsonBody(req)) return reply(res, 415, { error: 'JSON only.' });
       return reply(res, 200, await write(await readBody(req)));
     } catch (e) {
       if (!res.headersSent) reply(res, e.status || 500, { error: e.message });

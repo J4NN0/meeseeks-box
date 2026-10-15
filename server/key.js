@@ -1,9 +1,9 @@
 // The box's key. Writes to the API start and steer agents as you, and
-// 127.0.0.1 is open to every user on this machine, so writes need the key.
+// 127.0.0.1 is open to every user on this machine, so the API needs the key.
 // It's kept in a file only you can read. The server hands it to a browser
 // running as you (`sameUser`, GET /api/key); where it can't tell, the link it
 // prints (`#key=…`, which never goes over the wire) brings it instead. The
-// page keeps it and sends it with each write (src/data/api.js).
+// page keeps it and sends it with each request (src/data/api.js).
 
 import { execFile } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -28,6 +28,8 @@ function load() {
   const key = randomBytes(32).toString('hex');
   fs.mkdirSync(path.dirname(FILE), { recursive: true, mode: 0o700 });
   fs.writeFileSync(FILE, `${key}\n`, { mode: 0o600 });
+  // `mode` only applies to a new file: a bad one left over keeps its own.
+  fs.chmodSync(FILE, 0o600);
   return key;
 }
 

@@ -9,7 +9,7 @@
 // it's for: what to do and in which folder. Skip it, or close the panel
 // without answering, and it's gone.
 
-import { post } from '../data/api.js';
+import { get, post } from '../data/api.js';
 import { FolderPicker } from './folders.js';
 import { copyFrom, esc, shellQuote } from './util.js';
 
@@ -169,10 +169,9 @@ export class Talk {
     this.fetching = true;
     this.fetchedAt = now;
     const id = s.id;
-    fetch(`/api/chat?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
+    get(`/api/chat?id=${encodeURIComponent(id)}`)
       .then((data) => {
-        if (!data || this.agent?.id !== id) return;
+        if (this.agent?.id !== id) return;
         this.chat = data.chat || [];
         this.launcher = data.launcher || '';
         this.fetchedFor = key;

@@ -1,4 +1,4 @@
-// Writes to the box's API carry its key (server/key.js). The server hands it
+// Requests to the box's API carry its key (server/key.js). The server hands it
 // to a browser running as you (GET /api/key); where it can't tell, the link
 // it prints (`#key=…`) brings it instead. Either way this browser keeps it.
 
@@ -56,7 +56,7 @@ async function request(url, init = {}) {
   return data;
 }
 
-/** GETs a read that needs the key. */
+/** GETs a read. */
 export const get = (url) => request(url);
 
 /** POSTs `body` as JSON. */

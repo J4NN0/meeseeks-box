@@ -14,6 +14,7 @@ import { envNumber } from './util.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const port = envNumber('PORT', 5199);
 const host = process.env.HOST || '127.0.0.1';
+const LOOPBACK = /^(?:127\.|localhost$|::1$|\[::1\]$)/;
 
 const types = {
   '.html': 'text/html; charset=utf-8',
@@ -61,6 +62,7 @@ export const server = http
   .listen(port, host, () => {
     console.log(`🟦 Meeseeks Box running at http://${host}:${port}`);
     console.log(`🔑 If a browser can’t summon Meeseeks, open ${keyLink(`http://${host}:${port}`)} in it once.`);
+    if (!LOOPBACK.test(host)) console.warn(`⚠️  HOST=${host} lets other machines reach the box: its key is all that keeps them out of your sessions.`);
   });
 
 // The Meeseeks the box started stop with it.

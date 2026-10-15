@@ -1,5 +1,7 @@
 // Polls the local scanner for running Claude Code and Codex sessions.
 
+import { get } from './api.js';
+
 const POLL_MS = 2000;
 
 export class Feed {
@@ -27,9 +29,7 @@ export class Feed {
     const seq = ++this.asked;
     let sessions = null;
     try {
-      const res = await fetch('/api/sessions', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      sessions = (await res.json()).sessions || [];
+      sessions = (await get('/api/sessions')).sessions || [];
     } catch { /* counted below */ }
     // A poll sent later already answered: this one is older news.
     if (seq < this.answered) return;
